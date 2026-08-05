@@ -1,4 +1,8 @@
 packages:
   - packages/*
+onlyBuiltDependencies:
+  - unrs-resolver
+ignoredBuiltDependencies:
+  - esbuild
 allowBuilds:
-  esbuild: false
+  unrs-resolver: false
