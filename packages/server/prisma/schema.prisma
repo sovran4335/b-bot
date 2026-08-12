@@ -1,0 +1,179 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum ServerId {
+  anton
+  bakal
+  cain
+  casillas
+  diregie
+  hilder
+  prey
+  siroco
+}
+
+enum CharacterRole {
+  DEALER
+  BUFFER
+}
+
+model Adventure {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  serverId  ServerId? // 최초 로그인 시점엔 null. 대시보드 진입 후 별도로 설정 (3.2 참고, 느슨한 검증)
+  isAdmin   Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  characters Character[]
+  sessions   Session[]
+  actionLogs ActionLog[]
+
+  @@index([serverId])
+}
+
+model Character {
+  id                  String        @id @default(uuid())
+  adventureId         String
+  adventure           Adventure     @relation(fields: [adventureId], references: [id], onDelete: Cascade)
+  name                String
+  job                 String
+  role                CharacterRole
+  score               Int
+  order               Int
+  officialCharacterId String?       // 던파 공식 API 캐릭터 ID, 서버가 추후 매칭해 채워넣음 (D9)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  raidSlots RaidSlot[]
+
+  @@index([adventureId])
+  @@index([adventureId, order])
+}
+
+model Session {
+  id          String    @id @default(uuid()) // 쿠키에 담기는 값
+  adventureId String
+  adventure   Adventure @relation(fields: [adventureId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([adventureId])
+  @@index([expiresAt])
+}
+
+model RaidCategory {
+  id        String   @id @default(uuid())
+  label     String   // "일반", "하드", "쌀" 등
+  order     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  partyTemplates CategoryPartyTemplate[]
+  raidTeams      RaidTeam[]
+
+  @@unique([label])
+}
+
+// 카테고리(탭)에 속한 "파티 템플릿" — 새 기수 생성 시 이 정의를 스냅샷으로 복사한다 (D10, D11)
+model CategoryPartyTemplate {
+  id         String       @id @default(uuid())
+  categoryId String
+  category   RaidCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  label      String       // "레드", "옐로", "그린" 등 자유 텍스트
+  colorHex   String?
+  order      Int
+
+  @@index([categoryId])
+  @@unique([categoryId, order])
+}
+
+model RaidTeam {
+  id              String       @id @default(uuid())
+  categoryId      String
+  category        RaidCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  generationLabel String       // "일반 1기수" 등, 생성 시 서버가 계산해 저장
+  generationIndex Int          // 카테고리 내 정렬/자동 넘버링용 (예: 1, 2, 3 ...)
+  version         Int          @default(1) // 낙관적 락 (S7)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  parties RaidTeamParty[]
+  slots   RaidSlot[]
+
+  @@index([categoryId])
+  @@unique([categoryId, generationIndex])
+}
+
+// RaidTeam 생성 시점의 파티 구성 스냅샷 (카테고리 템플릿이 나중에 바뀌어도 영향받지 않음, D11)
+model RaidTeamParty {
+  id         String   @id @default(uuid())
+  raidTeamId String
+  raidTeam   RaidTeam @relation(fields: [raidTeamId], references: [id], onDelete: Cascade)
+  label      String
+  colorHex   String?
+  order      Int
+
+  slots RaidSlot[]
+
+  @@index([raidTeamId])
+  @@unique([raidTeamId, order])
+}
+
+model RaidSlot {
+  id          String        @id @default(uuid())
+  raidTeamId  String
+  raidTeam    RaidTeam      @relation(fields: [raidTeamId], references: [id], onDelete: Cascade)
+  partyId     String
+  party       RaidTeamParty @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  slotInParty Int           // 0 ~ PARTY_SIZE-1 (현재 PARTY_SIZE=4, 상수는 애플리케이션 레벨)
+  characterId String?
+  character   Character?    @relation(fields: [characterId], references: [id], onDelete: SetNull)
+
+  @@index([raidTeamId])
+  @@index([characterId])
+  @@unique([partyId, slotInParty])
+}
+
+enum LogActionType {
+  LOGIN
+  CHARACTER_CREATE
+  CHARACTER_UPDATE
+  CHARACTER_DELETE
+  CHARACTER_REORDER
+  RAID_TEAM_SAVE
+  RAID_CATEGORY_CREATE
+  RAID_CATEGORY_UPDATE
+  RAID_CATEGORY_DELETE
+  RAID_TEAM_CREATE
+  RAID_TEAM_DELETE
+}
+
+enum LogResult {
+  SUCCESS
+  FAILURE
+}
+
+model ActionLog {
+  id                String        @id @default(uuid())
+  actorAdventureId  String?       // 세션에서 특정, 삭제된 모험단이어도 로그는 남도록 SetNull
+  actor             Adventure?    @relation(fields: [actorAdventureId], references: [id], onDelete: SetNull)
+  actorNameSnapshot String        // 조회 편의 + 행위자 row가 사라져도 누가 했는지 알 수 있도록 저장 시점 이름 스냅샷
+  actionType        LogActionType
+  result            LogResult
+  targetType        String?       // "Character" | "RaidTeam" | "RaidCategory" | "Adventure" 등 자유 문자열
+  targetId          String?
+  metadata          Json?         // 부가 정보 (예: 변경 필드 diff, 충돌 여부 등)
+  clientTimestamp   DateTime      // 클라이언트가 보낸 실제 행위 발생 시각
+  createdAt         DateTime      @default(now()) // 서버 수신 시각
+
+  @@index([actorAdventureId])
+  @@index([actionType])
+  @@index([createdAt])
+}
