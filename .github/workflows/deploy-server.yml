@@ -1,0 +1,46 @@
+name: Deploy server to EC2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/server/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/deploy-server.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # 배포 전 실패한 빌드가 서버로 안 나가게 여기서 한 번 더 확인
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @packages/server run db:generate
+      - run: pnpm --filter @packages/server run typecheck
+      - run: pnpm --filter @packages/server run build
+
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/b-bot
+            git fetch origin main
+            git reset --hard origin/main
+            corepack enable
+            pnpm install --frozen-lockfile
+            pnpm --filter @packages/server run db:generate
+            pnpm --filter @packages/server exec prisma migrate deploy
+            pnpm --filter @packages/server run build
+            cd packages/server
+            pm2 startOrReload ecosystem.config.js
