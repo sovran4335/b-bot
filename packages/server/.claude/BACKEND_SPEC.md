@@ -21,6 +21,7 @@
 | S7  | 동시성 제어      | `RaidTeam.version` 정수 컬럼 기반 낙관적 락. 저장 요청 시 `baseVersion`이 현재 DB의 `version`과 다르면 트랜잭션을 커밋하지 않고 409와 최신 상태를 반환                                                                                                                                         |                                                                                                                                                   |
 | S8  | 활동 로깅        | 서버는 API 호출을 자동으로 로깅하지 않는다. **클라이언트가 별도로 `POST /logs`를 호출**해 의미 있는 상태 변경 동작(로그인, 캐릭터 CRUD/정렬, 공대표 저장, 카테고리·기수 CRUD)만 기록. 행위자는 클라이언트가 body로 보내지 않고 **세션에서 서버가 특정**한다. 조회(`GET /logs`)는 관리자만 가능 | 프론트 D12와 대응                                                                                                                                 |
 | S9  | 캐릭터 갱신(장비점수 동기화) | 던파 공식 던전앤파이터 공식 API가 아니라 **df.nexon.com 홈페이지가 내부적으로 쓰는 비공식 검색 API**(`GET https://df.nexon.com/world/character/fetch?serverName=&characName=`)를 서버가 대신 호출해 값을 가져온다. 인증/쿠키 불필요, `Referer: https://df.nexon.com/world/character` 헤더만 있으면 200 (curl로 확인). Playwright 등 브라우저 자동화는 불필요해서 안 씀 — Node 내장 `fetch`만 사용. 서버+캐릭터명이 정확히 일치하면 응답 배열 0번째가 그 캐릭터라고 가정(사용자 확인 사항). 응답의 `equipmentPoint`/`buffPoint`는 XOR 난독화되어 있어 `obfuscateKey.key`로 복호화 후 숫자만 추출(`decode-point.ts`, 헤더 스킵 오프셋은 관찰 기반 추정치라 넥슨 쪽 구현 변경 시 깨질 수 있음). `bufferCharacter`가 true면 `buffPoint`, 아니면 `equipmentPoint`를 점수로 채택 | 4.6 참고. 외부 사이트 구조에 의존하는 리버스 엔지니어링이라 깨질 수 있음 — 그때는 실제 응답 샘플 다시 떠서 오프셋/필드명 재확인 |
+| S10 | 캐릭터 등록 시 공식 데이터 자동 매칭 | 던파 공식 **Neople Open API**(`GET https://api.neople.co.kr/df/servers/{serverId}/characters?characterName=&apikey=`, API 키는 `NEOPLE_API_KEY` env)를 등록 시점에 호출해 `characterId`(→ `officialCharacterId`, D9)와 `jobId`(→ `jobId`/`Job` 참조)를 자동으로 채운다. 서버+이름이 정확히 일치하면 `rows[0]`이 그 캐릭터라고 가정(사용자 확인 사항). 이미지도 이 API의 서버군 이미지 서버(`https://img-api.neople.co.kr/df/servers/{serverId}/characters/{characterId}`)를 그대로 씀. **같은 모험단에 동명 캐릭터가 이미 있으면 새로 만들지 않고 그 캐릭터를 덮어쓴다**(중복 등록 방지) — 마이캐릭터 붙여넣기를 여러 번 해도 목록이 늘어나지 않음. 등록 시 `score`도 같은 시점에 S9 로직(`NexonScoreService`)으로 자동 조회, 못 찾으면 클라이언트가 보낸 값(현재 0) 유지 | `neople-character.service.ts`, 4.2/4.7 참고. `(adventureId, name)` unique 제약은 안 검(ponytail 주석 참고) — 동시 등록 레이스로 중복 생길 수 있으나 현재 유일한 호출부(등록 모달)가 순차 호출이라 실사용엔 안 걸림 |
 
 ---
 
@@ -99,7 +100,10 @@ model Character {
   role                CharacterRole
   score               Int
   order               Int
-  officialCharacterId String?       // 던파 공식 API 캐릭터 ID, 서버가 추후 매칭해 채워넣음 (D9)
+  officialCharacterId String?       // 던파 공식(Neople) API 캐릭터 ID. 등록 시 이름으로 검색해 자동 매칭 (D9, S10)
+  jobId               String?       // Neople 직업 대분류 id, Job 참조 (등록 시 officialCharacterId와 같이 채움, S10)
+  jobCategory         Job?          @relation(fields: [jobId], references: [id])
+  serverId            ServerId?     // 등록 시점 모험단 serverId 스냅샷. 공식 API/이미지 조회에 사용 (모험단 serverId가 나중에 바뀌어도 캐릭터별로 고정, D9)
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -107,6 +111,17 @@ model Character {
 
   @@index([adventureId])
   @@index([adventureId, order])
+  @@index([jobId])
+}
+
+// Neople 직업 대분류(예: 아처, 귀검사(남)) 참조 테이블. 전 모험단 공용 정적 데이터라
+// Character마다 중복 저장하지 않고 jobId로만 참조. 초기 18종은 마이그레이션에서 시딩,
+// 미등록 jobId를 새로 만나면(신규 직업 등) 등록 시점에 upsert로 채워 넣는다 (S10)
+model Job {
+  id   String @id // Neople jobId
+  name String
+
+  characters Character[]
 }
 
 model Session {
@@ -332,6 +347,8 @@ interface CharacterDto {
   score: number;
   order: number;
   officialCharacterId: string | null;
+  serverId: ServerId | null;
+  jobId: string | null; // Job 참조 테이블 id
 }
 ```
 
@@ -348,10 +365,14 @@ interface CharacterDto {
 }
 ```
 
-- `score`: `@IsInt() @Min(0)` (D7)
+- `score`: `@IsInt() @Min(0)` (D7) — 클라이언트가 보낸 값은 **폴백**일 뿐, 아래 자동 조회가 성공하면 덮어씀
 - `name`: 빈 문자열 불가, 길이 제한은 우선 1~30자 정도로 서버가 방어 [가정 — 명시된 제약 없음]
 - `order`는 서버가 계산: 현재 모험단의 캐릭터 중 최대 `order` + 1
-- `officialCharacterId`는 이 엔드포인트에서 받지 않고 항상 `null`로 생성 (D9)
+- **(S10) 요청 body에는 없지만 서버가 등록 시점에 자동으로 채우는 필드들**, `adventure.serverId`가 설정돼 있을 때만 동작(없으면 전부 `null`/기존 값 유지):
+  - `officialCharacterId`, `jobId` — Neople Open API로 이름 검색해 매칭 (D9)
+  - `score` — S9(NexonScoreService)로 최신 장비점수/버프력 조회, 못 찾으면 body의 `score` 유지
+  - `serverId` — 이 시점 `adventure.serverId`를 캐릭터에 스냅샷으로 저장
+- **동일 모험단에 같은 `name`의 캐릭터가 이미 있으면 새로 만들지 않고 그 캐릭터를 update(덮어쓰기)한다** (S10) — 캐릭터 등록(붙여넣기) 흐름을 여러 번 돌려도 목록이 늘어나지 않게. `(adventureId, name)` DB unique 제약은 없음(ponytail — 동시 등록 레이스 가능성 있으나 현재 순차 호출뿐이라 실사용 영향 없음)
 
 ### 4.3 `DELETE /characters/:id`
 
@@ -394,8 +415,25 @@ interface RefreshPreviewItemDto {
   job: string;
   oldScore: number;
   newScore: number | null; // null이면 공식 홈페이지에서 못 찾음(이름 변경 등)
+  officialCharacterId: string | null; // 초상화 이미지용, 캐릭터의 저장된 값 그대로
+  serverId: ServerId | null; // 캐릭터별 serverId, 없으면 모험단 serverId로 대체
 }
 ```
+
+- `newScore` 조회에 쓰는 `serverId`도 캐릭터별 `serverId`가 우선이고, 없는(마이그레이션 이전) 캐릭터만 모험단 값으로 대체
+
+### 4.7 `POST /characters/resolve-official-ids`
+
+- **등록 미리보기 전용**: 캐릭터를 붙여넣기로 파싱만 하고 아직 저장하기 전 단계에서, 초상화 이미지를 미리 보여주기 위해 이름만으로 `officialCharacterId`를 조회한다 (DB에 아무것도 안 씀)
+- `adventure.serverId`가 없으면 에러 없이 전부 `null`로 응답 (등록 자체를 막지 않기 위해)
+
+**Request**
+
+```ts
+{ names: string[] } // 1~50개, class-validator로 크기 제한
+```
+
+**Response**: `{ name: string; officialCharacterId: string | null }[]` (요청 배열과 같은 순서)
 
 ---
 
@@ -676,6 +714,7 @@ packages/server/
 │   │   ├── characters.service.ts
 │   │   ├── nexon-score.service.ts    # df.nexon.com 비공식 API 호출 (S9)
 │   │   ├── decode-point.ts           # equipmentPoint/buffPoint XOR 복호화
+│   │   ├── neople-character.service.ts # Neople 공식 API characterId/jobId 매칭 (S10)
 │   │   └── dto/
 │   ├── raid-categories/
 │   │   ├── raid-categories.module.ts
@@ -710,8 +749,9 @@ packages/server/
 | GET    | /me                     | 세션         | 현재 로그인된 모험단 정보                                          |
 | PATCH  | /me/server              | 세션         | 서버 선택/변경 (느슨한 검증, 언제든 변경 가능)                     |
 | GET    | /characters             | 세션         | 내 캐릭터 목록                                                     |
-| POST   | /characters             | 세션         | 캐릭터 등록                                                        |
+| POST   | /characters             | 세션         | 캐릭터 등록 (동명 있으면 덮어쓰기, officialCharacterId/jobId/score 자동 매칭, S10) |
 | GET    | /characters/refresh-preview | 세션     | df.nexon.com 비공식 API로 최신 장비점수/버프력 조회 (DB 갱신 없음, S9) |
+| POST   | /characters/resolve-official-ids | 세션 | 등록 미리보기용 officialCharacterId 조회 (DB 갱신 없음, S10) |
 | PATCH  | /characters/reorder     | 세션         | 정렬 순서 일괄 갱신                                                |
 | PATCH  | /characters/:id         | 세션(소유자) | 캐릭터 수정                                                        |
 | DELETE | /characters/:id         | 세션(소유자) | 캐릭터 삭제 (관련 슬롯 해제 + 영향받은 RaidTeam version 증가)      |
@@ -733,14 +773,13 @@ packages/server/
 
 - 봇은 이번 문서 범위 밖이지만, 같은 DB를 보는 이상 다음을 서버 팀이 미리 정해두는 것을 권장합니다 (S1 관련, 확인 필요):
   - 봇이 `isAdmin` 컬럼을 직접 `UPDATE`할 때 사용할 인증/권한 체계 (봇 자체의 관리자 명령 권한과는 별개로, DB 접속 계정 권한 문제)
-  - 봇이 캐릭터 정보를 조회/생성할 여지가 있다면, Character 테이블의 `officialCharacterId` 채우기(D9)를 봇이 담당할지
-    서버가 별도 배치로 담당할지 — 이번 범위에서는 미확정이므로 필드만 마련해둠
+  - `officialCharacterId`/`jobId` 채우기(D9)는 **서버가 캐릭터 등록 시점에 직접 담당**하는 것으로 확정됨(S10) — 봇이 별도로 채울 필요 없음
 
 ---
 
 ## 12. 이번 단계 구현 범위 제외 사항
 
 - 디스코드 봇 실제 구현
-- 던파 공식 API(정식 인증 발급받는 API) 연동 — 대신 df.nexon.com 비공식 검색 API로 장비점수/버프력만 동기화하는 기능은 구현함 (S9, 4.6)
+- ~~던파 공식 API 연동~~ → 구현됨: df.nexon.com 비공식 검색 API로 장비점수/버프력 동기화(S9, 4.6), Neople 공식 Open API로 officialCharacterId/jobId 자동 매칭 + 초상화 이미지(S10, 4.2/4.7)
 - Rate limiting, 요청 로깅/모니터링, 세션 만료 배치 정리
 - HTTPS/리버스 프록시 설정 자체 (인프라 영역, EC2 설정 시 별도 진행)

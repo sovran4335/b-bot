@@ -10,6 +10,7 @@ import {
 } from "../../lib/api/characters";
 import { ApiError } from "../../lib/api/client";
 import { logAction } from "../../lib/logging/logAction";
+import { CharacterAvatar } from "./CharacterAvatar";
 
 function DiffBadge({ oldScore, newScore }: { oldScore: number; newScore: number }) {
   const diff = newScore - oldScore;
@@ -121,11 +122,21 @@ export function CharacterRefreshModal({ onClose }: { onClose: () => void }) {
                     key={c.id}
                     className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${borderClass} ${notFound || isExcluded ? "opacity-50" : ""}`}
                   >
-                    <div>
-                      <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                        {c.name}
-                      </span>
-                      <span className="ml-2 text-xs text-zinc-500">{c.job}</span>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <CharacterAvatar
+                        serverId={c.serverId}
+                        officialCharacterId={c.officialCharacterId}
+                        jobId={c.jobId}
+                        size={28}
+                      />
+                      <div className="min-w-0">
+                        <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                          {c.name}
+                        </span>
+                        <span className="ml-2 text-xs text-zinc-500">
+                          {c.job}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-3">
                       {notFound ? (

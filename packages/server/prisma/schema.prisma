@@ -48,6 +48,9 @@ model Character {
   score               Int
   order               Int
   officialCharacterId String?       // 던파 공식 API 캐릭터 ID, 서버가 추후 매칭해 채워넣음 (D9)
+  serverId            ServerId?     // 등록 시점의 모험단 serverId 스냅샷. 이미지/공식 API 조회에 사용 (모험단 serverId가 바뀌어도 캐릭터별로 고정)
+  jobId               String?       // 던파 공식 API 직업 대분류 id (Job 참조), officialCharacterId와 같은 시점에 채움
+  jobCategory         Job?          @relation(fields: [jobId], references: [id])
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -55,6 +58,16 @@ model Character {
 
   @@index([adventureId])
   @@index([adventureId, order])
+  @@index([jobId])
+}
+
+// 던파 공식 API 직업 대분류(예: 아처, 귀검사(남)) 참조 테이블. 전 모험단 공용 정적 데이터라
+// Character마다 중복 저장하지 않고 jobId로만 참조한다. 초기 데이터는 마이그레이션에서 시딩.
+model Job {
+  id   String @id // Neople jobId
+  name String // 직업 대분류명
+
+  characters Character[]
 }
 
 model Session {

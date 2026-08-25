@@ -10,6 +10,7 @@ export const env = {
   sessionTtlDays: Number(process.env.SESSION_TTL_DAYS ?? 30),
   cookieSecure: process.env.COOKIE_SECURE === 'true',
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+  neopleApiKey: process.env.NEOPLE_API_KEY ?? '', // 없으면 officialCharacterId 매칭만 건너뜀 (필수 아님)
 };
 
 if (!env.databaseUrl) {

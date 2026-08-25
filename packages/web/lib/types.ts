@@ -39,6 +39,8 @@ export interface CharacterCard {
   score: number;
   order: number;
   officialCharacterId: string | null;
+  serverId: ServerId | null;
+  jobId: string | null; // 던파 공식 API 직업 대분류 id ([[jobCategories]] 참고)
 }
 
 export interface PartyDefinition {

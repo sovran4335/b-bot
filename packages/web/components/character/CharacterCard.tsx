@@ -3,6 +3,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { CharacterCard as CharacterCardType } from "../../lib/types";
+import { CharacterAvatar } from "./CharacterAvatar";
 
 const ROLE_LABEL: Record<string, string> = { DEALER: "딜러", BUFFER: "버퍼" };
 
@@ -43,6 +44,12 @@ export function CharacterCard({
       >
         ⠿
       </button>
+      <CharacterAvatar
+        serverId={character.serverId}
+        officialCharacterId={character.officialCharacterId}
+        jobId={character.jobId}
+        size={32}
+      />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate font-medium text-zinc-900 dark:text-zinc-50">

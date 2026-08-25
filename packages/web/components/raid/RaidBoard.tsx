@@ -3,6 +3,7 @@
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { PartyDefinition, RaidSlot } from "../../lib/types";
 import { PartyValidationIssue } from "../../lib/validation/partyComposition";
+import { CharacterAvatar } from "../character/CharacterAvatar";
 
 function RaidSlotCell({ slot }: { slot: RaidSlot }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({
@@ -36,13 +37,21 @@ function RaidSlotCell({ slot }: { slot: RaidSlot }) {
           ref={setDragRef}
           {...attributes}
           {...listeners}
-          className={`w-full cursor-grab touch-none ${isDragging ? "opacity-40" : ""}`}
+          className={`flex w-full items-center gap-2 cursor-grab touch-none ${isDragging ? "opacity-40" : ""}`}
         >
-          <div className="truncate font-medium text-zinc-900 dark:text-zinc-50">
-            {slot.character.name}
-          </div>
-          <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-            {slot.character.job} · {slot.character.score.toLocaleString()}
+          <CharacterAvatar
+            serverId={slot.character.serverId}
+            officialCharacterId={slot.character.officialCharacterId}
+            jobId={slot.character.jobId}
+            size={32}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium text-zinc-900 dark:text-zinc-50">
+              {slot.character.name}
+            </div>
+            <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
+              {slot.character.job} · {slot.character.score.toLocaleString()}
+            </div>
           </div>
         </div>
       ) : (

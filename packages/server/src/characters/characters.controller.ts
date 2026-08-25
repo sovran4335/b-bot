@@ -12,6 +12,7 @@ import {
 import type { Adventure } from '@prisma/client';
 import { CharactersService } from './characters.service';
 import { NexonScoreService } from './nexon-score.service';
+import { NeopleCharacterService } from './neople-character.service';
 import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 import { ReorderCharactersDto } from './dto/reorder-characters.dto';
@@ -20,6 +21,10 @@ import {
   RefreshPreviewItemDto,
   toCharacterDto,
 } from './dto/character.dto';
+import {
+  OfficialIdLookupResultDto,
+  ResolveOfficialIdsDto,
+} from './dto/resolve-official-ids.dto';
 import { SessionGuard } from '../auth/session.guard';
 import { CurrentAdventure } from '../auth/current-adventure.decorator';
 import { AppException } from '../common/app-exception';
@@ -30,6 +35,7 @@ export class CharactersController {
   constructor(
     private readonly charactersService: CharactersService,
     private readonly nexonScoreService: NexonScoreService,
+    private readonly neopleCharacterService: NeopleCharacterService,
   ) {}
 
   @Get()
@@ -54,13 +60,17 @@ export class CharactersController {
         '장비점수를 갱신하려면 먼저 서버를 설정해주세요.',
       );
     }
-    const serverId = adventure.serverId;
+    const fallbackServerId = adventure.serverId;
     const characters = await this.charactersService.findAllForAdventure(
       adventure.id,
     );
+    // 캐릭터별 serverId 스냅샷을 우선 쓰고, 없는(마이그레이션 이전) 캐릭터만 모험단 값으로 대체
     const newScores = await Promise.all(
       characters.map((c) =>
-        this.nexonScoreService.lookupScore(serverId, c.name),
+        this.nexonScoreService.lookupScore(
+          c.serverId ?? fallbackServerId,
+          c.name,
+        ),
       ),
     );
     return characters.map((c, i) => ({
@@ -69,6 +79,30 @@ export class CharactersController {
       job: c.job,
       oldScore: c.score,
       newScore: newScores[i],
+      officialCharacterId: c.officialCharacterId,
+      serverId: c.serverId ?? fallbackServerId,
+      jobId: c.jobId,
+    }));
+  }
+
+  // 등록 미리보기용: 아직 캐릭터가 생성되기 전, 이름만으로 초상화 이미지를 붙이기 위한 조회
+  @Post('resolve-official-ids')
+  async resolveOfficialIds(
+    @CurrentAdventure() adventure: Adventure,
+    @Body() dto: ResolveOfficialIdsDto,
+  ): Promise<OfficialIdLookupResultDto[]> {
+    const serverId = adventure.serverId;
+    const matches = await Promise.all(
+      dto.names.map((name) =>
+        serverId
+          ? this.neopleCharacterService.lookupCharacter(serverId, name)
+          : Promise.resolve(null),
+      ),
+    );
+    return dto.names.map((name, i) => ({
+      name,
+      officialCharacterId: matches[i]?.characterId ?? null,
+      jobId: matches[i]?.jobId ?? null,
     }));
   }
 
@@ -77,7 +111,11 @@ export class CharactersController {
     @CurrentAdventure() adventure: Adventure,
     @Body() dto: CreateCharacterDto,
   ): Promise<CharacterDto> {
-    const character = await this.charactersService.create(adventure.id, dto);
+    const character = await this.charactersService.create(
+      adventure.id,
+      dto,
+      adventure.serverId,
+    );
     return toCharacterDto(character);
   }
 

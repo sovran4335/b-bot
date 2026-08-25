@@ -25,6 +25,7 @@
 | D12  | 활동 로깅             | **상태를 바꾸는 의미 있는 동작만** 로깅(로그인, 캐릭터 CRUD/정렬, 공대표 저장, 카테고리·기수 CRUD). 드래그 중간값·탭 이동 같은 순수 UI 상호작용은 로깅하지 않음. **클라이언트가 직접 로그 이벤트를 만들어 별도 로깅 API(`POST /logs`)로 전송** (서버 자동 로깅 아님, 서버 호출이 없는 동작도 기록 가능하게 하기 위함). 로그 조회 페이지(`/admin/logs`)는 관리자만 접근 가능 | 확정, 12장 참고                                                                                                                     |
 | D13  | 캐릭터 등록 방식      | 수동 폼(이름/직업/역할/점수 직접 입력)으로 1건씩 등록하던 방식을 폐지. 넥슨 마이페이지 > 마이캐릭터 화면 전체를 붙여넣으면 (이름, 직업) 쌍을 파싱해 미리보기로 보여주고, 유저가 ✕로 제외한 나머지를 일괄 등록. `role`은 직업명 기반 하드코딩 규칙(크루세이더/인챈트리스/패러메딕/뮤즈 → 버퍼, 나머지 → 딜러)으로 자동 산정, `score`는 0으로 등록 후 유저가 캐릭터 카드 "수정"에서 채움. `CharacterFormModal`은 수정 전용으로 축소 | 확정 (2026-08-25) |
 | D14  | 캐릭터 갱신(장비점수 동기화) | 서버가 df.nexon.com 비공식 검색 API를 대신 호출해 최신 장비점수(딜러)/버프력(버퍼)을 가져와 서버 저장값과 비교하는 미리보기 제공. 값이 바뀐 캐릭터만 카운트/저장 대상, 유저가 개별 제외 가능, 최종 반영은 기존 캐릭터 수정 API 재사용 | 확정 (2026-08-25), 백엔드 S9와 대응 |
+| D15  | 캐릭터 초상화 이미지 + 공식 데이터 자동 매칭 | 등록 시 서버가 Neople 공식 API로 `officialCharacterId`/`jobId`/장비점수를 자동 매칭·저장(유저 수동 입력 없음). 프론트는 `CharacterAvatar` 컴포넌트 하나로 `serverId`+`officialCharacterId` 기반 초상화(`img-api.neople.co.kr`)를 내 캐릭터 카드/등록·갱신 미리보기/공대표 슬롯에 공통 표시, `jobId`별 `JOB_AVATAR_OFFSET`으로 프레이밍 미세 보정. 동일 이름 재등록은 서버가 upsert로 덮어써 중복 방지 | 확정 (2026-08-26), 백엔드 S10과 대응 |
 
 ---
 
@@ -85,7 +86,9 @@ interface CharacterCard {
   role: Role; // "dealer" | "buffer"
   score: number; // 딜러: 장비점수, 버퍼: 버프력 (정수, 0 이상)
   order: number; // 좌측 리스트 내 정렬 순서
-  officialCharacterId: string | null; // [D9] 던파 공식 API 캐릭터 ID, 유저 입력 아님(읽기 전용)
+  officialCharacterId: string | null; // [D9][D15] 던파 공식(Neople) API 캐릭터 ID, 등록 시 서버가 자동 매칭(읽기 전용)
+  serverId: ServerId | null; // [D15] 등록 시점 모험단 serverId 스냅샷. 초상화 이미지/공식 API 조회에 사용
+  jobId: string | null; // [D15] Neople 직업 대분류 id, jobCategories.ts의 JobId와 대응 (지금은 표시에 안 씀, 이미지 프레이밍 보정용으로 CharacterAvatar에 흘려보냄)
 }
 
 // 공대표 카테고리 (탭)
@@ -173,7 +176,7 @@ interface RaidSlot {
 
 ### 5.1 좌측 — 캐릭터 패널
 
-**컴포넌트**: `CharacterPanel`, `CharacterCard`, `CharacterImportModal`(등록), `CharacterFormModal`(수정 전용), `CharacterRefreshModal`(갱신)
+**컴포넌트**: `CharacterPanel`, `CharacterCard`, `CharacterImportModal`(등록), `CharacterFormModal`(수정 전용), `CharacterRefreshModal`(갱신), `CharacterAvatar`(초상화, 공용)
 
 기능:
 
@@ -187,22 +190,41 @@ interface RaidSlot {
      텍스트(메뉴/공지 등)는 무시한다. 레벨 값 자체는 저장하지 않는다(요구사항에 없음). 직업명 앞의
      "진(眞) " 접두어는 제거해 "트래블러", "엘레멘탈 마스터" 등 순수 직업명만 남긴다.
   2. **미리보기/확인**: 파싱된 (이름, 직업) 목록을 카드 리스트로 보여주고, 유저가 원치 않는 캐릭터는
-     각 항목의 ✕ 버튼으로 제외할 수 있다. 목록이 비면 저장 버튼 비활성화.
-  - **저장**: 남은 항목마다 `role`/`score`를 다음 규칙으로 자동 채워 `POST /api/characters`를 순차 호출
+     각 항목의 ✕ 버튼으로 제외할 수 있다. 목록이 비면 저장 버튼 비활성화. 이 단계에서 이미
+     `POST /api/characters/resolve-official-ids`를 한 번 호출해 각 이름의 초상화 이미지도 미리 보여준다
+     (아직 캐릭터가 저장되기 전이라 별도 조회 필요, [D15]).
+  - **저장**: 남은 항목마다 `role`을 다음 규칙으로 자동 채워 `POST /api/characters`를 순차 호출
     (서버 `order` 계산 경쟁 방지 위해 병렬 아님):
-    - `score`는 항상 `0`으로 등록 (수동 미입력 값, 이후 유저가 직접 카드 "수정"에서 채움)
     - `role`은 직업명에 "크루세이더", "인챈트리스", "패러메딕", "뮤즈"가 포함되면 `BUFFER`, 그 외 전부 `DEALER`
       (`inferRole()` — 하드코딩 목록, 신규 버퍼 직업 추가되면 이 목록만 갱신)
-  - `officialCharacterId`는 이 흐름에서도 노출하지 않는다 [D9] (서버가 `null`로 채움, 매칭 기능은 이후 과제).
+    - `score`는 일단 `0`으로 보내지만 [D15]에 따라 **서버가 등록 시점에 실제 장비점수/버프력으로 덮어씀** —
+      프론트는 그냥 낙관적 기본값만 보낸다고 생각하면 됨
+    - `officialCharacterId`/`jobId`도 이 요청에서는 안 보내고 서버가 채움 [D9][D15]
+    - **저장 진행 중 UI**: 캐릭터당 서버가 외부 API를 여러 번 호출해서(장비점수+공식 캐릭터ID) 느리므로,
+      진행률 바 + "저장 중... (N/전체)" 텍스트를 보여주고 "뒤로" 버튼도 비활성화
 - **[D14] 캐릭터 갱신 — df.nexon.com에서 최신 장비점수/버프력 동기화.** "+ 캐릭터 등록" 옆 "캐릭터 갱신" 버튼 → `CharacterRefreshModal` 오픈.
   - 오픈 즉시 `GET /characters/refresh-preview` 호출(서버가 df.nexon.com 비공식 API로 대신 조회, [D13/S9]). 로딩 중엔 실제 행과 같은 모양의 스켈레톤(펄스 애니메이션) 5줄 표시.
   - 캐릭터별로 서버 저장값 → 신규값과 증감 배지(초록 +, 빨강 -, 무배지면 변동 없음)를 보여주고, 값이 바뀐 카드는 카드 테두리도 증가=emerald/감소=red로 강조. 못 찾은 캐릭터(이름 변경 등)는 흐리게 표시 + 자동 제외, 나머지는 ✕로 개별 제외 가능(다시 클릭하면 포함으로 토글)
   - **저장 버튼의 "(N명)" 카운트 및 실제 반영 대상에는 변동 없는(신규값=기존값) 캐릭터를 포함하지 않는다** — 어차피 PATCH할 이유가 없으므로
   - 저장 시 남은 항목만 기존 `PATCH /characters/:id`(`score`만)를 순차 호출 — 새 bulk 엔드포인트 없음, `CharacterImportModal`과 같은 패턴
   - 딜러는 장비점수, 버퍼는 버프력이 자동으로 갱신 대상이 됨(서버가 `bufferCharacter` 값 보고 판단, 필드 하나로 통합된 `score`에 반영)
+- **[D15] 캐릭터 초상화 이미지 + 공식 데이터 자동 매칭.** 등록 시 서버가 Neople 공식 API로
+  `officialCharacterId`/`jobId`/장비점수를 자동으로 채워 넣는다(사용자 수동 입력 없음, 백엔드 S10 대응).
+  프론트는 이 값들로 캐릭터 초상화를 그린다:
+  - `CharacterAvatar` 컴포넌트(`components/character/CharacterAvatar.tsx`) 하나로 통일 — `serverId`+`officialCharacterId`가
+    둘 다 있어야 `https://img-api.neople.co.kr/df/servers/{serverId}/characters/{officialCharacterId}` 이미지를 그리고,
+    없으면 회색 placeholder 박스. `size × size` 박스를 `overflow-hidden`으로 감싸고 이미지는 `object-cover`로 꽉 채운 뒤
+    (비율 유지 + 확대된 느낌), `jobId`별 `JOB_AVATAR_OFFSET` 보정값(px 단위 x/y, 같은 파일에 정의)만큼 `translate`로 미세 조정
+    — 직업마다 원본 이미지 속 인물 위치가 달라서 필요한 jobId만 채워 넣으면 됨, 없는 jobId는 보정 없음
+  - 내 캐릭터 카드(`CharacterCard`), 등록 미리보기(`CharacterImportModal`), 갱신 미리보기(`CharacterRefreshModal`),
+    공대표 슬롯(`RaidBoard`/`RaidSlotCell`) 전부 같은 컴포넌트로 표시
+  - `lib/jobCategories.ts`: Neople 직업 대분류(jobId+jobName) 18종을 `JOB_CATEGORIES` 배열로 정리, `JobId`는 여기서
+    리터럴 유니언으로 자동 유도. 서버의 `Job` 참조 테이블과 값이 같아야 함(마이그레이션에 같은 값으로 시딩)
+  - **같은 이름의 캐릭터를 다시 등록하면 새로 만들지 않고 서버가 기존 캐릭터를 덮어쓴다** — 프론트는 신경 쓸 것 없음,
+    같은 `POST /api/characters` 호출이 서버에서 upsert로 처리됨(중복 등록 방지)
 - 카드 리스트:
   - `@dnd-kit`의 `SortableContext`로 세로 정렬, 스크롤 컨테이너 내부
-  - 각 카드: 이름/직업/역할 배지/점수, 우측 상단에 삭제(휴지통) 아이콘, 우측에 드래그 핸들
+  - 각 카드: 좌측에 `CharacterAvatar` 초상화, 이름/직업/역할 배지/점수, 우측 상단에 삭제(휴지통) 아이콘, 우측에 드래그 핸들
   - 드래그 종료 시 `order` 재계산 후 `PATCH /api/characters/reorder` (배열 전체 순서 전송) — **실시간 반영**(디바운스 300ms 권장, 요구사항 3.6 "실시간으로 서버에 반영")
   - 삭제 클릭 시 확인 다이얼로그 → `DELETE /api/characters/:id` → 성공 시 리스트에서 제거. **단, 해당 캐릭터가 현재 어떤 공대표 슬롯에 배치되어 있다면 그 슬롯도 함께 비워짐**을 안내 문구로 명시 (서버가 cascade 처리한다고 가정, 프론트는 관련 캐시 무효화만 수행)
   - 카드는 공대표 패널로 드래그 가능한 `Draggable` 소스로도 동작 (동일 dnd-kit 컨텍스트를 패널 간 공유하거나, `DndContext`를 상위 대시보드 레벨에 하나로 둠)
@@ -413,14 +435,14 @@ DashboardPage
 │   │   ├── CharacterFormModal (수정 전용)
 │   │   ├── CharacterRefreshModal (갱신, df.nexon.com 동기화 미리보기)
 │   │   └── SortableContext
-│   │       └── CharacterCard[] (draggable)
+│   │       └── CharacterCard[] (draggable, CharacterAvatar 포함)
 │   └── RaidPanel
 │       ├── RaidTabs
 │       ├── RaidGenerationSelector
 │       ├── ValidationBanner
 │       ├── RaidBoard
 │       │   └── RaidParty[] (parties.length개, 하드코딩 없음)
-│       │       └── RaidSlotCell x4 (PARTY_SIZE, droppable)
+│       │       └── RaidSlotCell x4 (PARTY_SIZE, droppable, CharacterAvatar 포함)
 │       └── ConflictResolutionModal (조건부 렌더)
 │       └── RaidCategoryFormModal (관리자, partyTemplate 편집 포함)
 
@@ -440,7 +462,8 @@ AdminLogsPage (관리자 전용, 별도 라우트)
 | GET    | /api/me                     | 현재 세션의 모험단 정보                                              |
 | PATCH  | /api/me/server              | 서버 선택/변경 (느슨한 검증, 언제든 가능)                            |
 | GET    | /api/characters             | 내 모험단의 캐릭터 목록 (order순)                                    |
-| POST   | /api/characters             | 캐릭터 등록                                                          |
+| POST   | /api/characters             | 캐릭터 등록 (동명 있으면 덮어쓰기, officialCharacterId/jobId/score 자동 매칭) |
+| POST   | /api/characters/resolve-official-ids | 등록 미리보기용 초상화 이미지 id 조회 (DB 갱신 없음)        |
 | GET    | /api/characters/refresh-preview | 캐릭터 갱신 미리보기 (df.nexon.com 최신값 조회, DB 갱신 없음)   |
 | PATCH  | /api/characters/reorder     | 순서 배열 일괄 갱신                                                  |
 | PATCH  | /api/characters/:id         | 캐릭터 정보 수정                                                     |
