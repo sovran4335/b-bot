@@ -23,3 +23,14 @@ export const deleteCharacter = (id: string) =>
 
 export const reorderCharacters = (orderedIds: string[]) =>
   apiPatch<CharacterCard[]>("/characters/reorder", { orderedIds });
+
+export interface RefreshPreviewItem {
+  id: string;
+  name: string;
+  job: string;
+  oldScore: number;
+  newScore: number | null; // null이면 공식 홈페이지에서 못 찾음
+}
+
+export const getRefreshPreview = () =>
+  apiGet<RefreshPreviewItem[]>("/characters/refresh-preview");

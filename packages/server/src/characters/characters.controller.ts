@@ -11,17 +11,26 @@ import {
 } from '@nestjs/common';
 import type { Adventure } from '@prisma/client';
 import { CharactersService } from './characters.service';
+import { NexonScoreService } from './nexon-score.service';
 import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 import { ReorderCharactersDto } from './dto/reorder-characters.dto';
-import { CharacterDto, toCharacterDto } from './dto/character.dto';
+import {
+  CharacterDto,
+  RefreshPreviewItemDto,
+  toCharacterDto,
+} from './dto/character.dto';
 import { SessionGuard } from '../auth/session.guard';
 import { CurrentAdventure } from '../auth/current-adventure.decorator';
+import { AppException } from '../common/app-exception';
 
 @Controller('characters')
 @UseGuards(SessionGuard)
 export class CharactersController {
-  constructor(private readonly charactersService: CharactersService) {}
+  constructor(
+    private readonly charactersService: CharactersService,
+    private readonly nexonScoreService: NexonScoreService,
+  ) {}
 
   @Get()
   async findAll(
@@ -31,6 +40,36 @@ export class CharactersController {
       adventure.id,
     );
     return characters.map(toCharacterDto);
+  }
+
+  // 정적 경로(refresh-preview)를 :id보다 먼저 선언해야 라우팅 충돌이 없다
+  @Get('refresh-preview')
+  async refreshPreview(
+    @CurrentAdventure() adventure: Adventure,
+  ): Promise<RefreshPreviewItemDto[]> {
+    if (!adventure.serverId) {
+      throw new AppException(
+        400,
+        'SERVER_NOT_SET',
+        '장비점수를 갱신하려면 먼저 서버를 설정해주세요.',
+      );
+    }
+    const serverId = adventure.serverId;
+    const characters = await this.charactersService.findAllForAdventure(
+      adventure.id,
+    );
+    const newScores = await Promise.all(
+      characters.map((c) =>
+        this.nexonScoreService.lookupScore(serverId, c.name),
+      ),
+    );
+    return characters.map((c, i) => ({
+      id: c.id,
+      name: c.name,
+      job: c.job,
+      oldScore: c.score,
+      newScore: newScores[i],
+    }));
   }
 
   @Post()

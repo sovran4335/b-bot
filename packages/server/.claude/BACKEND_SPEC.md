@@ -20,6 +20,7 @@
 | S6  | 관리자 승격      | 서버는 관리자 승격 API를 제공하지 않는다(D2). `isAdmin`은 DB 직접 조작 또는 디스코드 봇 전용 내부 스크립트/명령으로만 변경                                                                                                                                                                     | 서버 코드베이스에는 이 로직 자체가 존재하지 않음                                                                                                  |
 | S7  | 동시성 제어      | `RaidTeam.version` 정수 컬럼 기반 낙관적 락. 저장 요청 시 `baseVersion`이 현재 DB의 `version`과 다르면 트랜잭션을 커밋하지 않고 409와 최신 상태를 반환                                                                                                                                         |                                                                                                                                                   |
 | S8  | 활동 로깅        | 서버는 API 호출을 자동으로 로깅하지 않는다. **클라이언트가 별도로 `POST /logs`를 호출**해 의미 있는 상태 변경 동작(로그인, 캐릭터 CRUD/정렬, 공대표 저장, 카테고리·기수 CRUD)만 기록. 행위자는 클라이언트가 body로 보내지 않고 **세션에서 서버가 특정**한다. 조회(`GET /logs`)는 관리자만 가능 | 프론트 D12와 대응                                                                                                                                 |
+| S9  | 캐릭터 갱신(장비점수 동기화) | 던파 공식 던전앤파이터 공식 API가 아니라 **df.nexon.com 홈페이지가 내부적으로 쓰는 비공식 검색 API**(`GET https://df.nexon.com/world/character/fetch?serverName=&characName=`)를 서버가 대신 호출해 값을 가져온다. 인증/쿠키 불필요, `Referer: https://df.nexon.com/world/character` 헤더만 있으면 200 (curl로 확인). Playwright 등 브라우저 자동화는 불필요해서 안 씀 — Node 내장 `fetch`만 사용. 서버+캐릭터명이 정확히 일치하면 응답 배열 0번째가 그 캐릭터라고 가정(사용자 확인 사항). 응답의 `equipmentPoint`/`buffPoint`는 XOR 난독화되어 있어 `obfuscateKey.key`로 복호화 후 숫자만 추출(`decode-point.ts`, 헤더 스킵 오프셋은 관찰 기반 추정치라 넥슨 쪽 구현 변경 시 깨질 수 있음). `bufferCharacter`가 true면 `buffPoint`, 아니면 `equipmentPoint`를 점수로 채택 | 4.6 참고. 외부 사이트 구조에 의존하는 리버스 엔지니어링이라 깨질 수 있음 — 그때는 실제 응답 샘플 다시 떠서 오프셋/필드명 재확인 |
 
 ---
 
@@ -377,6 +378,25 @@ interface CharacterDto {
 - 이름/직업/역할/점수 수정. Body는 4.2와 동일 스키마(부분 업데이트 허용, `PartialType`)
 - 소유권 검사 동일하게 적용
 
+### 4.6 `GET /characters/refresh-preview`
+
+- 내 모험단의 캐릭터 전체에 대해 df.nexon.com 비공식 검색 API로 최신 장비점수/버프력을 조회해 서버 저장값과 비교 (S9)
+- `adventure.serverId`가 `null`이면 저장을 막지 않고 그냥 400 반환 (서버 미설정 상태에서는 검색 자체가 불가능하므로)
+- 캐릭터별 조회는 병렬(`Promise.all`)로 수행 — DB 쓰기가 없어 경쟁 상태 걱정 없음
+- 이 엔드포인트는 **DB를 갱신하지 않는다.** 실제 반영은 클라이언트가 미리보기에서 선택한 캐릭터만 골라 기존 `PATCH /characters/:id`를 순차 호출하는 방식 (별도 bulk update 엔드포인트 안 만듦)
+
+Response: `RefreshPreviewItemDto[]`
+
+```ts
+interface RefreshPreviewItemDto {
+  id: string;
+  name: string;
+  job: string;
+  oldScore: number;
+  newScore: number | null; // null이면 공식 홈페이지에서 못 찾음(이름 변경 등)
+}
+```
+
 ---
 
 ## 5. 공대표 카테고리(탭) API — 관리자 전용
@@ -654,6 +674,8 @@ packages/server/
 │   │   ├── characters.module.ts
 │   │   ├── characters.controller.ts
 │   │   ├── characters.service.ts
+│   │   ├── nexon-score.service.ts    # df.nexon.com 비공식 API 호출 (S9)
+│   │   ├── decode-point.ts           # equipmentPoint/buffPoint XOR 복호화
 │   │   └── dto/
 │   ├── raid-categories/
 │   │   ├── raid-categories.module.ts
@@ -689,6 +711,7 @@ packages/server/
 | PATCH  | /me/server              | 세션         | 서버 선택/변경 (느슨한 검증, 언제든 변경 가능)                     |
 | GET    | /characters             | 세션         | 내 캐릭터 목록                                                     |
 | POST   | /characters             | 세션         | 캐릭터 등록                                                        |
+| GET    | /characters/refresh-preview | 세션     | df.nexon.com 비공식 API로 최신 장비점수/버프력 조회 (DB 갱신 없음, S9) |
 | PATCH  | /characters/reorder     | 세션         | 정렬 순서 일괄 갱신                                                |
 | PATCH  | /characters/:id         | 세션(소유자) | 캐릭터 수정                                                        |
 | DELETE | /characters/:id         | 세션(소유자) | 캐릭터 삭제 (관련 슬롯 해제 + 영향받은 RaidTeam version 증가)      |
@@ -717,6 +740,7 @@ packages/server/
 
 ## 12. 이번 단계 구현 범위 제외 사항
 
-- 던파 공식 API 연동(캐릭터 검색/매칭), 디스코드 봇 실제 구현
+- 디스코드 봇 실제 구현
+- 던파 공식 API(정식 인증 발급받는 API) 연동 — 대신 df.nexon.com 비공식 검색 API로 장비점수/버프력만 동기화하는 기능은 구현함 (S9, 4.6)
 - Rate limiting, 요청 로깅/모니터링, 세션 만료 배치 정리
 - HTTPS/리버스 프록시 설정 자체 (인프라 영역, EC2 설정 시 별도 진행)

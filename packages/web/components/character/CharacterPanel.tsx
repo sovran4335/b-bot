@@ -11,6 +11,7 @@ import { CharacterCard as CharacterCardType } from "../../lib/types";
 import { CharacterCard } from "./CharacterCard";
 import { CharacterFormModal } from "./CharacterFormModal";
 import { CharacterImportModal } from "./CharacterImportModal";
+import { CharacterRefreshModal } from "./CharacterRefreshModal";
 import { deleteCharacter } from "../../lib/api/characters";
 import { logAction } from "../../lib/logging/logAction";
 
@@ -29,6 +30,7 @@ export function CharacterPanel({
     null,
   );
   const [importOpen, setImportOpen] = useState(false);
+  const [refreshOpen, setRefreshOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<CharacterCardType | null>(
     null,
   );
@@ -62,12 +64,20 @@ export function CharacterPanel({
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
           내 캐릭터
         </h2>
-        <button
-          onClick={() => setImportOpen(true)}
-          className="rounded-lg bg-zinc-900 px-2 py-1 text-xs text-white dark:bg-zinc-50 dark:text-zinc-900"
-        >
-          + 캐릭터 등록
-        </button>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setImportOpen(true)}
+            className="rounded-lg bg-zinc-900 px-2 py-1 text-xs text-white dark:bg-zinc-50 dark:text-zinc-900"
+          >
+            + 캐릭터 등록
+          </button>
+          <button
+            onClick={() => setRefreshOpen(true)}
+            className="rounded-lg border border-zinc-300 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
+          >
+            캐릭터 갱신
+          </button>
+        </div>
       </div>
 
       <div ref={setNodeRef} className="flex-1 space-y-2 overflow-y-auto p-3">
@@ -103,6 +113,10 @@ export function CharacterPanel({
 
       {importOpen && (
         <CharacterImportModal onClose={() => setImportOpen(false)} />
+      )}
+
+      {refreshOpen && (
+        <CharacterRefreshModal onClose={() => setRefreshOpen(false)} />
       )}
 
       {pendingDelete && (

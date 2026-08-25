@@ -24,6 +24,7 @@
 | D11  | 파티 템플릿 소급 적용 | 카테고리(탭)의 파티 템플릿을 수정해도 **이미 생성된 기수(공대표)에는 소급 적용되지 않음**. 기수 생성 시점의 템플릿을 스냅샷으로 저장                                                                                                                                                                                                                                        | [가정] 데이터 정합성을 위한 기본값. 문제 있으면 알려주세요                                                                          |
 | D12  | 활동 로깅             | **상태를 바꾸는 의미 있는 동작만** 로깅(로그인, 캐릭터 CRUD/정렬, 공대표 저장, 카테고리·기수 CRUD). 드래그 중간값·탭 이동 같은 순수 UI 상호작용은 로깅하지 않음. **클라이언트가 직접 로그 이벤트를 만들어 별도 로깅 API(`POST /logs`)로 전송** (서버 자동 로깅 아님, 서버 호출이 없는 동작도 기록 가능하게 하기 위함). 로그 조회 페이지(`/admin/logs`)는 관리자만 접근 가능 | 확정, 12장 참고                                                                                                                     |
 | D13  | 캐릭터 등록 방식      | 수동 폼(이름/직업/역할/점수 직접 입력)으로 1건씩 등록하던 방식을 폐지. 넥슨 마이페이지 > 마이캐릭터 화면 전체를 붙여넣으면 (이름, 직업) 쌍을 파싱해 미리보기로 보여주고, 유저가 ✕로 제외한 나머지를 일괄 등록. `role`은 직업명 기반 하드코딩 규칙(크루세이더/인챈트리스/패러메딕/뮤즈 → 버퍼, 나머지 → 딜러)으로 자동 산정, `score`는 0으로 등록 후 유저가 캐릭터 카드 "수정"에서 채움. `CharacterFormModal`은 수정 전용으로 축소 | 확정 (2026-08-25) |
+| D14  | 캐릭터 갱신(장비점수 동기화) | 서버가 df.nexon.com 비공식 검색 API를 대신 호출해 최신 장비점수(딜러)/버프력(버퍼)을 가져와 서버 저장값과 비교하는 미리보기 제공. 값이 바뀐 캐릭터만 카운트/저장 대상, 유저가 개별 제외 가능, 최종 반영은 기존 캐릭터 수정 API 재사용 | 확정 (2026-08-25), 백엔드 S9와 대응 |
 
 ---
 
@@ -172,7 +173,7 @@ interface RaidSlot {
 
 ### 5.1 좌측 — 캐릭터 패널
 
-**컴포넌트**: `CharacterPanel`, `CharacterCard`, `CharacterImportModal`(등록), `CharacterFormModal`(수정 전용)
+**컴포넌트**: `CharacterPanel`, `CharacterCard`, `CharacterImportModal`(등록), `CharacterFormModal`(수정 전용), `CharacterRefreshModal`(갱신)
 
 기능:
 
@@ -193,6 +194,12 @@ interface RaidSlot {
     - `role`은 직업명에 "크루세이더", "인챈트리스", "패러메딕", "뮤즈"가 포함되면 `BUFFER`, 그 외 전부 `DEALER`
       (`inferRole()` — 하드코딩 목록, 신규 버퍼 직업 추가되면 이 목록만 갱신)
   - `officialCharacterId`는 이 흐름에서도 노출하지 않는다 [D9] (서버가 `null`로 채움, 매칭 기능은 이후 과제).
+- **[D14] 캐릭터 갱신 — df.nexon.com에서 최신 장비점수/버프력 동기화.** "+ 캐릭터 등록" 옆 "캐릭터 갱신" 버튼 → `CharacterRefreshModal` 오픈.
+  - 오픈 즉시 `GET /characters/refresh-preview` 호출(서버가 df.nexon.com 비공식 API로 대신 조회, [D13/S9]). 로딩 중엔 실제 행과 같은 모양의 스켈레톤(펄스 애니메이션) 5줄 표시.
+  - 캐릭터별로 서버 저장값 → 신규값과 증감 배지(초록 +, 빨강 -, 무배지면 변동 없음)를 보여주고, 값이 바뀐 카드는 카드 테두리도 증가=emerald/감소=red로 강조. 못 찾은 캐릭터(이름 변경 등)는 흐리게 표시 + 자동 제외, 나머지는 ✕로 개별 제외 가능(다시 클릭하면 포함으로 토글)
+  - **저장 버튼의 "(N명)" 카운트 및 실제 반영 대상에는 변동 없는(신규값=기존값) 캐릭터를 포함하지 않는다** — 어차피 PATCH할 이유가 없으므로
+  - 저장 시 남은 항목만 기존 `PATCH /characters/:id`(`score`만)를 순차 호출 — 새 bulk 엔드포인트 없음, `CharacterImportModal`과 같은 패턴
+  - 딜러는 장비점수, 버퍼는 버프력이 자동으로 갱신 대상이 됨(서버가 `bufferCharacter` 값 보고 판단, 필드 하나로 통합된 `score`에 반영)
 - 카드 리스트:
   - `@dnd-kit`의 `SortableContext`로 세로 정렬, 스크롤 컨테이너 내부
   - 각 카드: 이름/직업/역할 배지/점수, 우측 상단에 삭제(휴지통) 아이콘, 우측에 드래그 핸들
@@ -404,6 +411,7 @@ DashboardPage
 │   ├── CharacterPanel
 │   │   ├── CharacterImportModal (등록, 붙여넣기→미리보기 2단계)
 │   │   ├── CharacterFormModal (수정 전용)
+│   │   ├── CharacterRefreshModal (갱신, df.nexon.com 동기화 미리보기)
 │   │   └── SortableContext
 │   │       └── CharacterCard[] (draggable)
 │   └── RaidPanel
@@ -433,6 +441,7 @@ AdminLogsPage (관리자 전용, 별도 라우트)
 | PATCH  | /api/me/server              | 서버 선택/변경 (느슨한 검증, 언제든 가능)                            |
 | GET    | /api/characters             | 내 모험단의 캐릭터 목록 (order순)                                    |
 | POST   | /api/characters             | 캐릭터 등록                                                          |
+| GET    | /api/characters/refresh-preview | 캐릭터 갱신 미리보기 (df.nexon.com 최신값 조회, DB 갱신 없음)   |
 | PATCH  | /api/characters/reorder     | 순서 배열 일괄 갱신                                                  |
 | PATCH  | /api/characters/:id         | 캐릭터 정보 수정                                                     |
 | DELETE | /api/characters/:id         | 캐릭터 삭제                                                          |
