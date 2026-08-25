@@ -8,7 +8,7 @@ import {
   characterFormSchema,
   CharacterFormSchema,
 } from "../../lib/validation/schemas";
-import { createCharacter, updateCharacter } from "../../lib/api/characters";
+import { updateCharacter } from "../../lib/api/characters";
 import { CharacterCard } from "../../lib/types";
 import { logAction } from "../../lib/logging/logAction";
 
@@ -21,7 +21,7 @@ export function CharacterFormModal({
   character,
   onClose,
 }: {
-  character?: CharacterCard; // 없으면 신규 등록
+  character: CharacterCard;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -32,42 +32,38 @@ export function CharacterFormModal({
     formState: { errors, isSubmitting },
   } = useForm<CharacterFormSchema>({
     resolver: zodResolver(characterFormSchema),
-    defaultValues: character
-      ? {
-          name: character.name,
-          job: character.job,
-          role: character.role,
-          score: character.score,
-        }
-      : { role: "DEALER" },
+    defaultValues: {
+      name: character.name,
+      job: character.job,
+      role: character.role,
+      score: character.score,
+    },
   });
   const role = watch("role");
 
   const mutation = useMutation({
     mutationFn: (values: CharacterFormSchema) =>
-      character
-        ? updateCharacter(character.id, values)
-        : createCharacter(values),
+      updateCharacter(character.id, values),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["characters"] });
       await logAction({
-        actionType: character ? "CHARACTER_UPDATE" : "CHARACTER_CREATE",
+        actionType: "CHARACTER_UPDATE",
         result: "SUCCESS",
         targetType: "Character",
-        targetId: character?.id,
+        targetId: character.id,
       });
       onClose();
     },
     onError: async () => {
       await logAction({
-        actionType: character ? "CHARACTER_UPDATE" : "CHARACTER_CREATE",
+        actionType: "CHARACTER_UPDATE",
         result: "FAILURE",
       });
     },
   });
 
   return (
-    <Modal title={character ? "캐릭터 수정" : "캐릭터 등록"} onClose={onClose}>
+    <Modal title="캐릭터 수정" onClose={onClose}>
       <form
         onSubmit={handleSubmit((v) => mutation.mutate(v))}
         className="space-y-3"

@@ -10,6 +10,7 @@ import {
 import { CharacterCard as CharacterCardType } from "../../lib/types";
 import { CharacterCard } from "./CharacterCard";
 import { CharacterFormModal } from "./CharacterFormModal";
+import { CharacterImportModal } from "./CharacterImportModal";
 import { deleteCharacter } from "../../lib/api/characters";
 import { logAction } from "../../lib/logging/logAction";
 
@@ -24,9 +25,10 @@ export function CharacterPanel({
   // 캐릭터 전체를 모든 카테고리/기수에 대해 스캔하는 비용을 피했다.
   placedCharacterIds: Set<string>;
 }) {
-  const [formTarget, setFormTarget] = useState<
-    "new" | CharacterCardType | null
-  >(null);
+  const [editTarget, setEditTarget] = useState<CharacterCardType | null>(
+    null,
+  );
+  const [importOpen, setImportOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<CharacterCardType | null>(
     null,
   );
@@ -61,7 +63,7 @@ export function CharacterPanel({
           내 캐릭터
         </h2>
         <button
-          onClick={() => setFormTarget("new")}
+          onClick={() => setImportOpen(true)}
           className="rounded-lg bg-zinc-900 px-2 py-1 text-xs text-white dark:bg-zinc-50 dark:text-zinc-900"
         >
           + 캐릭터 등록
@@ -80,7 +82,7 @@ export function CharacterPanel({
               placedAt={
                 placedCharacterIds.has(c.id) ? currentGenerationLabel : null
               }
-              onEdit={() => setFormTarget(c)}
+              onEdit={() => setEditTarget(c)}
               onDelete={() => setPendingDelete(c)}
             />
           ))}
@@ -92,11 +94,15 @@ export function CharacterPanel({
         )}
       </div>
 
-      {formTarget && (
+      {editTarget && (
         <CharacterFormModal
-          character={formTarget === "new" ? undefined : formTarget}
-          onClose={() => setFormTarget(null)}
+          character={editTarget}
+          onClose={() => setEditTarget(null)}
         />
+      )}
+
+      {importOpen && (
+        <CharacterImportModal onClose={() => setImportOpen(false)} />
       )}
 
       {pendingDelete && (
