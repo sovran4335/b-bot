@@ -4,6 +4,8 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { CharacterCard as CharacterCardType } from "../../lib/types";
 import { CharacterAvatar } from "./CharacterAvatar";
+import Image from "next/image";
+import CharacterTypeIcon from "./CharacterTypeIcon";
 
 const ROLE_LABEL: Record<string, string> = { DEALER: "딜러", BUFFER: "버퍼" };
 
@@ -48,7 +50,6 @@ export function CharacterCard({
         serverId={character.serverId}
         officialCharacterId={character.officialCharacterId}
         jobId={character.jobId}
-        size={32}
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
@@ -58,15 +59,20 @@ export function CharacterCard({
           <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
             {ROLE_LABEL[character.role]}
           </span>
+          {placedAt && (
+            <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
+              배치됨 · {placedAt}
+            </span>
+          )}
         </div>
         <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
-          {character.job} · {character.score.toLocaleString()}
+          {character.job}
         </div>
-        {placedAt && (
-          <div className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-            배치됨 · {placedAt}
-          </div>
-        )}
+        <div className="flex items-center gap-1">
+          <CharacterTypeIcon jobType={character.role}  />
+          <span className="truncate text-[12px] font-bold text-[#3392ff]">{character.score.toLocaleString()}</span>
+        </div>
+        
       </div>
       <button
         onClick={onEdit}

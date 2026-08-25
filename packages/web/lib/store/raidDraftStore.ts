@@ -1,7 +1,9 @@
 // 5.2.5: 현재 열람 중인 기수의 로컬 드래프트(슬롯 배치)와 baseVersion을 들고 있는 스토어.
 // 서버 상태(React Query)와 분리된 "편집 중" 상태만 다룬다.
 import { create } from "zustand";
-import { CharacterCard, RaidSlot, RaidTeam } from "../types";
+import { RaidSlot, RaidTeam } from "../types";
+
+type SlotCharacter = NonNullable<RaidSlot["character"]>;
 
 interface RaidDraftState {
   teamId: string | null;
@@ -9,7 +11,7 @@ interface RaidDraftState {
   slots: RaidSlot[];
   dirty: boolean;
   loadTeam: (team: RaidTeam) => void;
-  placeCharacter: (slotId: string, character: CharacterCard) => void;
+  placeCharacter: (slotId: string, character: SlotCharacter) => void;
   clearSlot: (slotId: string) => void;
   applyServerSlots: (team: RaidTeam) => void; // 저장 성공/충돌 해소 후 서버본으로 동기화
   bumpBaseVersion: (version: number) => void; // 충돌 재시도 시 baseVersion만 최신화 (내 작업 내용은 유지)

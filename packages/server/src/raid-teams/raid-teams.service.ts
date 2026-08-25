@@ -13,7 +13,8 @@ import {
 
 const detailInclude = {
   parties: { orderBy: { order: 'asc' as const } },
-  slots: { include: { character: true } },
+  // 공대표는 여러 모험단 캐릭터가 섞여서 배치되므로(D5), 슬롯 카드에 소속 모험단 이름을 같이 보여주려고 join
+  slots: { include: { character: { include: { adventure: true } } } },
 };
 
 @Injectable()

@@ -18,6 +18,7 @@ export interface RefreshPreviewItemDto {
   id: string;
   name: string;
   job: string;
+  role: CharacterRole;
   oldScore: number;
   newScore: number | null; // null이면 공식 홈페이지에서 못 찾음(이름 변경 등)
   officialCharacterId: string | null;

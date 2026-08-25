@@ -94,8 +94,13 @@ export default function DashboardPage() {
     }
 
     // 캐릭터 패널 -> 공대표 슬롯 배치
+    // 좌측 패널은 항상 내 모험단 캐릭터만 보여주므로, 저장 전에도 adventureName을
+    // 바로 붙여줄 수 있다 (서버 재조회 없이 이미 로드된 내 모험단 이름 재사용)
     if (activeData.type === "character" && overData?.type === "slot") {
-      draft.placeCharacter(overData.slot.id, activeData.character);
+      draft.placeCharacter(overData.slot.id, {
+        ...activeData.character,
+        adventureName: adventure?.name,
+      });
       return;
     }
 

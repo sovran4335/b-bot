@@ -77,6 +77,7 @@ export class CharactersController {
       id: c.id,
       name: c.name,
       job: c.job,
+      role: c.role,
       oldScore: c.score,
       newScore: newScores[i],
       officialCharacterId: c.officialCharacterId,

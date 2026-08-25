@@ -4,6 +4,8 @@ import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { PartyDefinition, RaidSlot } from "../../lib/types";
 import { PartyValidationIssue } from "../../lib/validation/partyComposition";
 import { CharacterAvatar } from "../character/CharacterAvatar";
+import CharacterTypeIcon from "../character/CharacterTypeIcon";
+import { useRaidDraftStore } from "../../lib/store/raidDraftStore";
 
 function RaidSlotCell({ slot }: { slot: RaidSlot }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({
@@ -22,38 +24,68 @@ function RaidSlotCell({ slot }: { slot: RaidSlot }) {
       : undefined,
     disabled: !slot.character,
   });
-
+  const clearSlot = useRaidDraftStore((s) => s.clearSlot);
   return (
     <div
       ref={setDropRef}
-      className={`flex h-14 items-center rounded-lg border px-2 text-xs ${
+      className={`flex h-20 items-center rounded-lg border px-2 text-xs ${
         isOver
           ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40"
           : "border-dashed border-zinc-300 dark:border-zinc-700"
       } ${slot.character ? "border-solid bg-white dark:bg-zinc-800" : ""}`}
     >
       {slot.character ? (
-        <div
-          ref={setDragRef}
-          {...attributes}
-          {...listeners}
-          className={`flex w-full items-center gap-2 cursor-grab touch-none ${isDragging ? "opacity-40" : ""}`}
-        >
-          <CharacterAvatar
-            serverId={slot.character.serverId}
-            officialCharacterId={slot.character.officialCharacterId}
-            jobId={slot.character.jobId}
-            size={32}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-medium text-zinc-900 dark:text-zinc-50">
-              {slot.character.name}
+        <>
+          <div
+            ref={setDragRef}
+            {...attributes}
+            {...listeners}
+            className={`flex min-w-0 flex-1 items-center gap-2 cursor-grab touch-none ${isDragging ? "opacity-40" : ""}`}
+          >
+            <button
+              className="cursor-grab touch-none px-0.5 text-zinc-400"
+              aria-label="드래그 핸들"
+            >
+              ⠿
+            </button>
+            <div className="border border-zinc-600 rounded-lg relative">
+              {   
+                slot.character.adventureName && (
+                  <span className="absolute whitespace-nowrap -translate-y-1/2 left-1/2 -translate-x-1/2 z-1 rounded border-zinc-600 border bg-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300">
+                    {slot.character.adventureName}
+                  </span>
+                )
+              }
+              <CharacterAvatar
+                serverId={slot.character.serverId}
+                officialCharacterId={slot.character.officialCharacterId}
+                jobId={slot.character.jobId}
+                className="!bg-black"
+              />
             </div>
-            <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-              {slot.character.job} · {slot.character.score.toLocaleString()}
+            <div className="min-w-0 flex-1 ml-2">
+              <span className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-50">
+                {slot.character.name}
+              </span>
+              <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                {slot.character.job}
+              </div>
+              <div className="flex items-center gap-1">
+                <CharacterTypeIcon jobType={slot.character.role} />
+                <span className="truncate text-[12px] font-bold text-[#3392ff]">
+                  {slot.character.score.toLocaleString()}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
+          <button
+            onClick={() => clearSlot(slot.id)}
+            className="shrink-0 px-1 text-zinc-400 hover:text-red-600"
+            aria-label="현재 기수에서 제거"
+          >
+            ✕
+          </button>
+        </>
       ) : (
         <span className="text-zinc-400">빈 자리</span>
       )}
@@ -71,7 +103,7 @@ function RaidPartyGroup({
   issues: PartyValidationIssue[];
 }) {
   return (
-    <div className="min-w-[220px] rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+    <div className="min-w-[280px] rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
       <div className="mb-2 flex items-center gap-2">
         <span
           className="h-2.5 w-2.5 rounded-full"

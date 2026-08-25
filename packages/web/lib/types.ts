@@ -63,7 +63,9 @@ export interface RaidSlot {
   id: string;
   partyId: string;
   slotInParty: number;
-  character: CharacterCard | null;
+  // adventureName은 서버가 내려주는 공대표 상세에만 있음(D5 — 여러 모험단 캐릭터가 섞여 배치되므로 구분용).
+  // 로컬 드래그 배치 직후(저장 전) 낙관적 갱신 시점엔 아직 없을 수 있어 optional.
+  character: (CharacterCard & { adventureName?: string }) | null;
 }
 
 export interface RaidTeamSummary {

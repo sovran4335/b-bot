@@ -59,7 +59,7 @@ export function CharacterPanel({
   });
 
   return (
-    <div className="flex w-72 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800">
+    <div className="flex w-90 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800">
       <div className="flex items-center justify-between p-3">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
           내 캐릭터

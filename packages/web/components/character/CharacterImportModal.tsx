@@ -192,13 +192,12 @@ export function CharacterImportModal({ onClose }: { onClose: () => void }) {
                     serverId={adventure?.serverId}
                     officialCharacterId={c.officialCharacterId}
                     jobId={c.jobId}
-                    size={28}
                   />
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex flex-col ml-2 gap-0.5">
                     <span className="font-medium text-zinc-900 dark:text-zinc-50">
                       {c.name}
                     </span>
-                    <span className="ml-2 text-xs text-zinc-500">{c.job}</span>
+                    <span className="text-xs text-zinc-500">{c.job}</span>
                   </div>
                 </div>
                 <button

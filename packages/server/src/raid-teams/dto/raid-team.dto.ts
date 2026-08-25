@@ -1,4 +1,10 @@
-import { Character, RaidSlot, RaidTeam, RaidTeamParty } from '@prisma/client';
+import {
+  Adventure,
+  Character,
+  RaidSlot,
+  RaidTeam,
+  RaidTeamParty,
+} from '@prisma/client';
 import {
   CharacterDto,
   toCharacterDto,
@@ -24,7 +30,9 @@ export function toRaidTeamSummaryDto(team: RaidTeam): RaidTeamSummaryDto {
   };
 }
 
-type SlotWithCharacter = RaidSlot & { character: Character | null };
+type SlotWithCharacter = RaidSlot & {
+  character: (Character & { adventure: Adventure }) | null;
+};
 type TeamWithDetail = RaidTeam & {
   parties: RaidTeamParty[];
   slots: SlotWithCharacter[];
@@ -41,7 +49,8 @@ export interface RaidTeamDetailDto extends RaidTeamSummaryDto {
     id: string;
     partyId: string;
     slotInParty: number;
-    character: CharacterDto | null;
+    // 다른 모험단 캐릭터도 같은 공대표에 섞여 배치될 수 있어(D5) 카드에 소속 모험단 이름을 같이 내려준다
+    character: (CharacterDto & { adventureName: string }) | null;
   }[];
 }
 
@@ -60,7 +69,12 @@ export function toRaidTeamDetailDto(team: TeamWithDetail): RaidTeamDetailDto {
       id: s.id,
       partyId: s.partyId,
       slotInParty: s.slotInParty,
-      character: s.character ? toCharacterDto(s.character) : null,
+      character: s.character
+        ? {
+            ...toCharacterDto(s.character),
+            adventureName: s.character.adventure.name,
+          }
+        : null,
     })),
   };
 }
