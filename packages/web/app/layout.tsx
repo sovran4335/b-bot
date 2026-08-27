@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "B-bot 공대표",
-  description: "던전앤파이터 공대표 서비스",
+  title: "븜봇 대시보드",
+  description: "븜봇 대시보드",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

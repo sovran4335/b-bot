@@ -12,6 +12,7 @@ import {
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { SignupDto } from './dto/signup.dto';
 import { SelectServerDto } from './dto/select-server.dto';
 import { toAdventureDto } from './dto/adventure.dto';
 import type { AdventureDto } from './dto/adventure.dto';
@@ -29,11 +30,25 @@ export class AuthController {
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ adventure: AdventureDto; isNewUser: boolean }> {
-    const { adventure, isNewUser, sessionId, expiresAt } =
-      await this.authService.login(dto.adventureName);
+  ): Promise<{ adventure: AdventureDto }> {
+    const { adventure, sessionId, expiresAt } = await this.authService.login(
+      dto.adventureName,
+    );
     this.setSessionCookie(res, sessionId, expiresAt);
-    return { adventure: toAdventureDto(adventure), isNewUser };
+    return { adventure: toAdventureDto(adventure) };
+  }
+
+  @Post('auth/signup')
+  async signup(
+    @Body() dto: SignupDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ adventure: AdventureDto }> {
+    const { adventure, sessionId, expiresAt } = await this.authService.signup(
+      dto.adventureName,
+      dto.serverId,
+    );
+    this.setSessionCookie(res, sessionId, expiresAt);
+    return { adventure: toAdventureDto(adventure) };
   }
 
   @Post('auth/logout')

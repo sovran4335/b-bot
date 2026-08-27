@@ -2,8 +2,12 @@ import { apiGet, apiPatch, apiPost } from "./client";
 import { Adventure, ServerId } from "../types";
 
 export const login = (adventureName: string) =>
-  apiPost<{ adventure: Adventure; isNewUser: boolean }>("/auth/login", {
+  apiPost<{ adventure: Adventure }>("/auth/login", { adventureName });
+
+export const signup = (adventureName: string, serverId: ServerId) =>
+  apiPost<{ adventure: Adventure }>("/auth/signup", {
     adventureName,
+    serverId,
   });
 
 export const logout = () => apiPost<{ ok: true }>("/auth/logout");

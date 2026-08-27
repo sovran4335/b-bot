@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SERVER_LABELS, ServerId } from "../types";
 
 // 6장: 공용 유효성 규칙
 export const adventureNameSchema = z.string().refine((v) => {
@@ -8,6 +9,16 @@ export const adventureNameSchema = z.string().refine((v) => {
   );
   return v.length >= 1 && weightedLength <= 16;
 }, "모험단 이름은 한글 최대 8자 또는 영문 최대 16자입니다."); // [가정: 혼용 규칙]
+
+export const serverIdSchema = z.enum(
+  Object.keys(SERVER_LABELS) as [ServerId, ...ServerId[]],
+);
+
+export const signupFormSchema = z.object({
+  adventureName: adventureNameSchema,
+  serverId: serverIdSchema,
+});
+export type SignupFormValues = z.infer<typeof signupFormSchema>;
 
 export const scoreSchema = z.number().int().min(0);
 

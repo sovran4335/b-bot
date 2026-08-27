@@ -16,7 +16,7 @@
 | S2  | 프레임워크       | NestJS (모듈 구조: `AuthModule`, `AdventureModule`, `CharacterModule`, `RaidCategoryModule`, `RaidTeamModule`)                                                                                                                                                                                 |                                                                                                                                                   |
 | S3  | 세션 관리        | DB에 `Session` 테이블을 두는 **stateful 세션**. 세션 id를 httpOnly 쿠키로 발급                                                                                                                                                                                                                 |                                                                                                                                                   |
 | S4  | ORM              | Prisma + PostgreSQL. `DATABASE_URL`은 EC2 로컬 인스턴스 기준 아래 값 사용                                                                                                                                                                                                                      | `postgresql://sovran:a62343422@localhost:5432/bbot?schema=public`                                                                                 |
-| S5  | 인증 방식        | 비밀번호 없음(D1과 동일). 모험단 이름으로만 로그인/가입, 세션 발급 시에도 별도 검증 없음                                                                                                                                                                                                       | 보안 조치는 이번 범위에서 의도적으로 제외                                                                                                         |
+| S5  | 인증 방식        | 비밀번호 없음(D1과 동일). 모험단 이름으로 로그인(가입된 이름만), 회원가입(`/auth/signup`)은 이름+서버로 별도 처리, 세션 발급 시에도 별도 검증 없음                                                                                                                                                                                                       | 보안 조치는 이번 범위에서 의도적으로 제외. 2026-08-27: 로그인 자동 가입 제거                                                                                                         |
 | S6  | 관리자 승격      | 서버는 관리자 승격 API를 제공하지 않는다(D2). `isAdmin`은 DB 직접 조작 또는 디스코드 봇 전용 내부 스크립트/명령으로만 변경                                                                                                                                                                     | 서버 코드베이스에는 이 로직 자체가 존재하지 않음                                                                                                  |
 | S7  | 동시성 제어      | `RaidTeam.version` 정수 컬럼 기반 낙관적 락. 저장 요청 시 `baseVersion`이 현재 DB의 `version`과 다르면 트랜잭션을 커밋하지 않고 409와 최신 상태를 반환                                                                                                                                         |                                                                                                                                                   |
 | S8  | 활동 로깅        | 서버는 API 호출을 자동으로 로깅하지 않는다. **클라이언트가 별도로 `POST /logs`를 호출**해 의미 있는 상태 변경 동작(로그인, 캐릭터 CRUD/정렬, 공대표 저장, 카테고리·기수 CRUD)만 기록. 행위자는 클라이언트가 body로 보내지 않고 **세션에서 서버가 특정**한다. 조회(`GET /logs`)는 관리자만 가능 | 프론트 D12와 대응                                                                                                                                 |
@@ -266,6 +266,8 @@ model ActionLog {
 
 ### 3.1 로그인 (`POST /auth/login`)
 
+**변경(2026-08-27)**: 로그인은 더 이상 자동 가입을 하지 않는다. 가입은 3.1-1의 별도 엔드포인트로 분리.
+
 **Request Body**
 
 ```ts
@@ -282,16 +284,36 @@ model ActionLog {
 **처리 로직**
 
 1. `adventureName`으로 `Adventure` 조회
-2. 없으면: 신규 `Adventure` 생성 (`isAdmin: false`, `serverId: null` — 서버 선택은 대시보드 진입 후 별도로 진행, 3.2 참고)
-3. 있으면: 해당 row 그대로 사용
-4. `Session` row 생성 (`expiresAt = now + SESSION_TTL_DAYS`)
-5. `Set-Cookie: bbot_sid=<session.id>; HttpOnly; SameSite=Lax; Secure(prod); Max-Age=...`
-6. 응답: `{ adventure: AdventureDto, isNewUser: boolean }`
+2. 없으면: `404 ADVENTURE_NOT_FOUND` ("가입되지 않은 모험단입니다. 회원가입을 진행해주세요.")
+3. 있으면: `Session` row 생성 (`expiresAt = now + SESSION_TTL_DAYS`)
+4. `Set-Cookie: bbot_sid=<session.id>; HttpOnly; SameSite=Lax; Secure(prod); Max-Age=...`
+5. 응답: `{ adventure: AdventureDto }`
+
+### 3.1-1 회원가입 (`POST /auth/signup`)
+
+**Request Body**
+
+```ts
+{
+  adventureName: string;
+  serverId: ServerId; // 필수 — 로그인과 달리 가입 시점에 받는다
+}
+```
+
+**검증**: `adventureName`은 3.1과 동일 규칙. `serverId`는 enum(8종) 값이어야 함.
+
+**처리 로직**
+
+1. `adventureName` 중복 확인 → 있으면 `409 ADVENTURE_NAME_TAKEN`
+2. 신규 `Adventure` 생성 (`isAdmin: false`, `serverId`는 요청받은 값으로 즉시 설정)
+3. `Session` row 생성 + 쿠키 발급 (3.1과 동일)
+4. 응답: `{ adventure: AdventureDto }`
 
 ### 3.2 서버 선택 (대시보드 진입 후, 느슨한 검증)
 
-**확정**: 로그인 폼은 모험단 이름만 받는다. `Adventure.serverId`는 **nullable**로 두고, 서버 선택은
-대시보드 진입 후 별도 온보딩 UI에서 처리한다. "느슨하게 검증"한다는 방침에 따라 다음을 지킨다.
+**확정(2026-08-27 갱신)**: 로그인 폼은 모험단 이름만 받는다 — 기존 유저는 이미 3.1-1 가입 시점에 `serverId`를
+설정했기 때문. `Adventure.serverId`는 여전히 **nullable** 컬럼이며(스키마 변경 없음), 가입 후에도 서버 선택은
+대시보드 진입 후 배너/모달로 언제든 재변경 가능하다. "느슨하게 검증"한다는 방침에 따라 다음을 지킨다.
 
 - 서버 선택은 **필수로 강제하지 않는다**: `serverId`가 `null`이어도 캐릭터 등록, 공대표 참여 등 다른 모든 기능은 정상 동작해야 한다
   (D3에서 이미 정했듯 `serverId`는 저장용 태그일 뿐 어떤 기능도 이 값에 의존하지 않으므로 자연스럽게 성립)
@@ -744,7 +766,8 @@ packages/server/
 
 | Method | Path                    | 권한         | 설명                                                               |
 | ------ | ----------------------- | ------------ | ------------------------------------------------------------------ |
-| POST   | /auth/login             | 없음         | 모험단 이름으로 로그인/가입, 세션 쿠키 발급 (serverId는 받지 않음) |
+| POST   | /auth/login             | 없음         | 모험단 이름으로 로그인, 세션 쿠키 발급 (가입 안 된 이름이면 404) |
+| POST   | /auth/signup             | 없음         | 모험단 이름+서버로 회원가입, 세션 쿠키 발급 (이름 중복이면 409) |
 | POST   | /auth/logout            | 세션         | (선택) 세션 무효화                                                 |
 | GET    | /me                     | 세션         | 현재 로그인된 모험단 정보                                          |
 | PATCH  | /me/server              | 세션         | 서버 선택/변경 (느슨한 검증, 언제든 변경 가능)                     |
