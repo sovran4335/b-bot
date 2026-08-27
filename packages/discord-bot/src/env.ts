@@ -8,6 +8,12 @@ export const env = {
   // 있으면 그 서버에만 즉시 반영되는 guild 커맨드로 등록(개발용, Discord 권장 방식).
   // 없으면 전역(global) 등록 — 반영까지 최대 1시간 정도 걸릴 수 있음.
   discordGuildId: process.env.DISCORD_GUILD_ID || undefined,
+
+  // packages/server 백엔드. 봇은 로그인 개념이 없어서, 아래 전용 서비스 계정으로
+  // /auth/login(없으면 /auth/signup)해서 세션 쿠키를 받아 쓴다 (apiClient.ts 참고).
+  backendUrl: process.env.BACKEND_URL ?? "http://localhost:4000",
+  botAdventureName: process.env.DISCORD_BOT_ADVENTURE_NAME ?? "디스코드봇",
+  botServerId: process.env.DISCORD_BOT_SERVER_ID ?? "anton",
 };
 
 if (!env.discordBotToken) {

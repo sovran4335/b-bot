@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, Events, Collection } from "discord.js";
 import { env } from "./env";
 import { commands } from "./commands";
+import { handleButton as handleRaidViewButton } from "./commands/raidView";
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const commandsByName = new Collection(commands.map((c) => [c.data.name, c]));
@@ -10,6 +11,20 @@ client.once(Events.ClientReady, (c) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton()) {
+    // "rv:" 접두어는 /공대표보기의 탐색 버튼 — customId에 상태가 그대로 실려 있어서 라우팅만 하면 됨
+    if (!interaction.customId.startsWith("rv:")) return;
+    try {
+      await handleRaidViewButton(interaction);
+    } catch (err) {
+      console.error("공대표보기 버튼 처리 실패", err);
+      await interaction
+        .reply({ content: "처리 중 오류가 발생했습니다.", ephemeral: true })
+        .catch(() => {});
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const command = commandsByName.get(interaction.commandName);
