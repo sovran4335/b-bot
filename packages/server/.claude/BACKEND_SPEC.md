@@ -135,17 +135,33 @@ model Session {
   @@index([expiresAt])
 }
 
-model RaidCategory {
+// 상위탭 (2026-08-27 추가). 예: "미카엘라", "디레지에" — 5장 참고
+model RaidGroup {
   id        String   @id @default(uuid())
-  label     String   // "일반", "하드", "쌀" 등
+  label     String
   order     Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  categories RaidCategory[]
+
+  @@unique([label])
+}
+
+model RaidCategory {
+  id        String    @id @default(uuid())
+  groupId   String
+  group     RaidGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  label     String    // "일반", "하드", "쌀" 등
+  order     Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
   partyTemplates CategoryPartyTemplate[]
   raidTeams      RaidTeam[]
 
-  @@unique([label])
+  @@unique([groupId, label]) // 그룹 안에서만 유일하면 됨 — 미카엘라/디레지에 둘 다 "일반"을 가질 수 있음
+  @@index([groupId])
 }
 
 // 카테고리(탭)에 속한 "파티 템플릿" — 새 기수 생성 시 이 정의를 스냅샷으로 복사한다 (D10, D11)
@@ -459,15 +475,37 @@ interface RefreshPreviewItemDto {
 
 ---
 
-## 5. 공대표 카테고리(탭) API — 관리자 전용
+## 5. 공대표 상위탭/카테고리 API — 관리자 전용 (2026-08-27 갱신: 상위탭 도입)
 
-### 5.1 `GET /raid-categories`
+**계층**: `RaidGroup`(상위탭, 예: "미카엘라"/"디레지에") → `RaidCategory`(하위탭, 예: "일반"/"하드"/"쌀") →
+`RaidTeam`(기수) → `RaidTeamParty`(레드/옐로/그린) → `RaidSlot`. 그룹은 언제든 관리자가 추가할 수 있고,
+카테고리 `label`은 이제 그룹 전역이 아니라 **그룹 안에서만** 유일하면 된다(`@@unique([groupId, label])`) —
+그래서 미카엘라에도 "일반", 디레지에에도 "일반"이 동시에 존재할 수 있다.
 
-- 인증만 필요(모든 로그인 유저 열람 가능), `order` 오름차순
+**그룹 내 유일 배치 규칙**: 같은 캐릭터는 같은 `RaidGroup` 안에서는 기수(`RaidTeam`) 하나에만 배치될 수
+있다 — 카테고리가 달라도(미카엘라-일반, 미카엘라-하드) 마찬가지. 그룹이 다르면 독립이라 미카엘라와
+디레지에에 동시에 배치돼 있는 건 정상이다. DB 제약이 아니라 `PUT /raid-teams/:id` 저장 시점에
+애플리케이션 레벨로 강제한다 (6.5 참고) — 그룹을 넘나드는 복합 unique를 슬롯 테이블에 직접 거는 게
+번거롭고, 기존에도 "같은 기수 내 중복"을 이런 식(저장 시점 처리)으로 다뤄왔던 것과 일관되게 맞춤.
+
+### 5.0 `GET /raid-groups`
+
+- 인증만 필요, `order` 오름차순. `{ id, label, order }[]`
+
+### 5.0-1 `POST /raid-groups` / `PATCH /raid-groups/:id` / `DELETE /raid-groups/:id` (Admin)
+
+- `POST`: `{ label }`, `order`는 현재 최대값+1 자동 부여, `label` 중복 시 409
+- `DELETE`: 소속된 `RaidCategory`(및 그 아래 `RaidTeam`/`RaidTeamParty`/`RaidSlot`)까지 전부 cascade 삭제 —
+  프론트에서 반드시 확인 경고 후 호출할 것
+
+### 5.1 `GET /raid-categories?groupId=`
+
+- 인증만 필요(모든 로그인 유저 열람 가능), 특정 그룹 소속만 `order` 오름차순으로 반환. `groupId` 생략 시 전체 반환(관리 용도로만 씀, 프론트는 항상 groupId를 붙여서 호출)
 
 ```ts
 interface RaidCategoryDto {
   id: string;
+  groupId: string;
   label: string;
   order: number;
   partyTemplate: {
@@ -485,18 +523,19 @@ interface RaidCategoryDto {
 
 ```ts
 {
+  groupId: string;
   label: string;
   partyTemplate: { label: string; colorHex?: string }[]; // order는 배열 순서대로 서버가 부여
 }
 ```
 
 - `partyTemplate`은 최소 1개 이상 [가정: 파티가 0개인 탭은 의미가 없으므로]
-- `label` 중복 시 409 (`@@unique([label])`)
-- `order`는 서버가 현재 최대값 + 1로 자동 부여
+- 같은 `groupId` 안에서 `label` 중복 시 409 (`@@unique([groupId, label])`)
+- `order`는 그룹 안에서 서버가 현재 최대값 + 1로 자동 부여
 
 ### 5.3 `PATCH /raid-categories/:id` (Admin)
 
-- `label`, `partyTemplate` 수정 가능
+- `label`, `partyTemplate` 수정 가능 (`groupId` 이동은 지원하지 않음 — 필요해지면 그때 추가)
 - **`partyTemplate`을 수정해도 기존에 생성된 `RaidTeam`/`RaidTeamParty`/`RaidSlot`은 절대 건드리지 않는다 (D11)**.
   구현상 `CategoryPartyTemplate` row들을 통째로 지우고 요청받은 배열로 다시 생성하는 방식(delete-then-recreate)을 권장 —
   어차피 기존 `RaidTeam`은 `RaidTeamParty`라는 별도 스냅샷 테이블을 참조하므로 영향 없음
@@ -622,6 +661,17 @@ if (result.count === 0) {
   "저장 자체를 막지 않는" 것이 정책이므로, 서버는 구조적으로 불가능한 입력(존재하지 않는 슬롯/캐릭터 등)만 400으로 막고,
   "버퍼 2명 이상" 같은 의미적 경고는 저장을 허용한다. (D4와 일치)
 
+**그룹 내 유일 배치 강제 (2026-08-27 추가, 5장 참고)**: 위 2번(버전 체크 통과) 이후, 3번(슬롯 업데이트) 전에 실행.
+
+1. 이 `RaidTeam`의 `categoryId` → `groupId` 조회
+2. `dto.slots`에 포함된 `characterId`들 중 하나라도, **다른 `raidTeamId`**를 가지면서 **같은 `groupId`**에
+   속한 `RaidSlot`에 이미 배치돼 있으면(카테고리가 다르더라도) 그 슬롯들을 찾아 `characterId = null`로 비운다
+   (프론트가 "같은 기수 내" 중복을 저장 전에 이미 정리해서 보내는 것과 동일한 논리를, 그룹 전체로 확장한 것)
+3. 그렇게 비운 슬롯들이 속한 **다른 기수들**의 `version`도 `+1` 해서, 그 기수를 마침 열어보고 있던 다른 세션이
+   있으면 다음 저장 시 낙관적 락 충돌(409)로 자연스럽게 감지되게 한다 — 별도 실시간 알림 없이, 기존
+   충돌 해결 모달로 흡수
+4. 이후 3번(슬롯 업데이트)은 원래 로직 그대로 진행
+
 ---
 
 ## 7. 활동 로그 API (S8)
@@ -738,6 +788,11 @@ packages/server/
 │   │   ├── decode-point.ts           # equipmentPoint/buffPoint XOR 복호화
 │   │   ├── neople-character.service.ts # Neople 공식 API characterId/jobId 매칭 (S10)
 │   │   └── dto/
+│   ├── raid-groups/                  # 상위탭 (2026-08-27 추가)
+│   │   ├── raid-groups.module.ts
+│   │   ├── raid-groups.controller.ts
+│   │   ├── raid-groups.service.ts
+│   │   └── dto/
 │   ├── raid-categories/
 │   │   ├── raid-categories.module.ts
 │   │   ├── raid-categories.controller.ts
@@ -778,15 +833,20 @@ packages/server/
 | PATCH  | /characters/reorder     | 세션         | 정렬 순서 일괄 갱신                                                |
 | PATCH  | /characters/:id         | 세션(소유자) | 캐릭터 수정                                                        |
 | DELETE | /characters/:id         | 세션(소유자) | 캐릭터 삭제 (관련 슬롯 해제 + 영향받은 RaidTeam version 증가)      |
-| GET    | /raid-categories        | 세션         | 탭 목록 (파티 템플릿 포함)                                         |
-| POST   | /raid-categories        | 관리자       | 탭 생성                                                            |
+| GET    | /raid-groups            | 세션         | 상위탭 목록                                                        |
+| POST   | /raid-groups            | 관리자       | 상위탭 생성                                                        |
+| PATCH  | /raid-groups/:id        | 관리자       | 상위탭 이름 수정                                                   |
+| DELETE | /raid-groups/:id        | 관리자       | 상위탭 삭제 (카테고리·기수 cascade 삭제)                           |
+| GET    | /raid-categories?groupId= | 세션       | 해당 상위탭의 하위탭 목록 (파티 템플릿 포함)                       |
+| POST   | /raid-categories        | 관리자       | 하위탭 생성 (`groupId` 필수)                                       |
 | PATCH  | /raid-categories/:id    | 관리자       | 탭/파티템플릿 수정 (기존 기수엔 소급 없음)                         |
 | DELETE | /raid-categories/:id    | 관리자       | 탭 삭제 (기수 cascade 삭제)                                        |
 | GET    | /raid-teams?categoryId= | 세션         | 기수 목록                                                          |
 | POST   | /raid-teams             | 관리자       | 기수 생성 (파티템플릿 스냅샷 + 빈 슬롯 생성)                       |
 | DELETE | /raid-teams/:id         | 관리자       | 기수 삭제                                                          |
 | GET    | /raid-teams/:id         | 세션         | 기수 상세(파티+슬롯+캐릭터 조인)                                   |
-| PUT    | /raid-teams/:id         | 세션         | 슬롯 저장, `baseVersion` 필요, 실패 시 409 + 최신본                |
+| PUT    | /raid-teams/:id         | 세션         | 슬롯 저장, `baseVersion` 필요, 실패 시 409 + 최신본. 그룹 내 다른 기수에 있던 캐릭터는 자동으로 비움(5장) |
+| GET    | /characters/placements  | 세션         | 내 캐릭터들의 현재 배치(그룹/카테고리/기수 라벨) 목록 — 배지 표시용 (2026-08-27 추가) |
 | POST   | /logs                   | 세션         | 활동 로그 이벤트 기록 (행위자는 세션에서 결정)                     |
 | GET    | /logs                   | 관리자       | 활동 로그 조회 (필터/커서 페이지네이션)                            |
 

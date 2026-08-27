@@ -25,6 +25,7 @@ import {
   OfficialIdLookupResultDto,
   ResolveOfficialIdsDto,
 } from './dto/resolve-official-ids.dto';
+import { CharacterPlacementDto } from './dto/character-placement.dto';
 import { SessionGuard } from '../auth/session.guard';
 import { CurrentAdventure } from '../auth/current-adventure.decorator';
 import { AppException } from '../common/app-exception';
@@ -48,7 +49,14 @@ export class CharactersController {
     return characters.map(toCharacterDto);
   }
 
-  // 정적 경로(refresh-preview)를 :id보다 먼저 선언해야 라우팅 충돌이 없다
+  // 정적 경로(refresh-preview/placements)를 :id보다 먼저 선언해야 라우팅 충돌이 없다
+  @Get('placements')
+  async placements(
+    @CurrentAdventure() adventure: Adventure,
+  ): Promise<CharacterPlacementDto[]> {
+    return this.charactersService.findPlacements(adventure.id);
+  }
+
   @Get('refresh-preview')
   async refreshPreview(
     @CurrentAdventure() adventure: Adventure,

@@ -7,7 +7,10 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { CharacterCard as CharacterCardType } from "../../lib/types";
+import {
+  CharacterCard as CharacterCardType,
+  CharacterPlacement,
+} from "../../lib/types";
 import { CharacterCard } from "./CharacterCard";
 import { CharacterFormModal } from "./CharacterFormModal";
 import { CharacterImportModal } from "./CharacterImportModal";
@@ -17,14 +20,11 @@ import { logAction } from "../../lib/logging/logAction";
 
 export function CharacterPanel({
   characters,
-  currentGenerationLabel,
-  placedCharacterIds,
+  placements,
 }: {
   characters: CharacterCardType[];
-  currentGenerationLabel: string | null;
-  // [가정] 배치 여부는 현재 열어본 기수 기준으로만 표시한다. 전체 기수 대상 배치 조회 API가 스펙에 없어
-  // 캐릭터 전체를 모든 카테고리/기수에 대해 스캔하는 비용을 피했다.
-  placedCharacterIds: Set<string>;
+  // 그룹 내 유일 배치 규칙상 캐릭터당 그룹별로 최대 1개, 여러 그룹에 걸쳐 있을 수 있다
+  placements: CharacterPlacement[];
 }) {
   const [editTarget, setEditTarget] = useState<CharacterCardType | null>(
     null,
@@ -59,7 +59,7 @@ export function CharacterPanel({
   });
 
   return (
-    <div className="flex w-90 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800">
+    <div className="flex min-h-0 w-90 shrink-0 flex-col overflow-hidden border-r border-zinc-200 dark:border-zinc-800">
       <div className="flex items-center justify-between p-3">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
           내 캐릭터
@@ -80,7 +80,7 @@ export function CharacterPanel({
         </div>
       </div>
 
-      <div ref={setNodeRef} className="flex-1 space-y-2 overflow-y-auto p-3">
+      <div ref={setNodeRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         <SortableContext
           items={characters.map((c) => c.id)}
           strategy={verticalListSortingStrategy}
@@ -89,9 +89,7 @@ export function CharacterPanel({
             <CharacterCard
               key={c.id}
               character={c}
-              placedAt={
-                placedCharacterIds.has(c.id) ? currentGenerationLabel : null
-              }
+              placements={placements.filter((p) => p.characterId === c.id)}
               onEdit={() => setEditTarget(c)}
               onDelete={() => setPendingDelete(c)}
             />

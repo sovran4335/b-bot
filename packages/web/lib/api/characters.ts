@@ -1,5 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
-import { CharacterCard, Role, ServerId } from "../types";
+import { CharacterCard, CharacterPlacement, Role, ServerId } from "../types";
 
 export interface CharacterFormValues {
   name: string;
@@ -9,6 +9,9 @@ export interface CharacterFormValues {
 }
 
 export const listCharacters = () => apiGet<CharacterCard[]>("/characters");
+
+export const getCharacterPlacements = () =>
+  apiGet<CharacterPlacement[]>("/characters/placements");
 
 export const createCharacter = (data: CharacterFormValues) =>
   apiPost<CharacterCard>("/characters", data);

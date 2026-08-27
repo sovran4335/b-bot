@@ -13,8 +13,9 @@ type CategoryWithTemplates = RaidCategory & {
 export class RaidCategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(): Promise<CategoryWithTemplates[]> {
+  findAll(groupId?: string): Promise<CategoryWithTemplates[]> {
     return this.prisma.raidCategory.findMany({
+      where: groupId ? { groupId } : undefined,
       orderBy: { order: 'asc' },
       include: { partyTemplates: { orderBy: { order: 'asc' } } },
     });
@@ -22,10 +23,12 @@ export class RaidCategoriesService {
 
   async create(dto: CreateRaidCategoryDto): Promise<CategoryWithTemplates> {
     const last = await this.prisma.raidCategory.findFirst({
+      where: { groupId: dto.groupId }, // order는 그룹 안에서만 순번 매김
       orderBy: { order: 'desc' },
     });
     return this.prisma.raidCategory.create({
       data: {
+        groupId: dto.groupId,
         label: dto.label,
         order: (last?.order ?? -1) + 1,
         partyTemplates: {

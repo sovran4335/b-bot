@@ -81,17 +81,36 @@ model Session {
   @@index([expiresAt])
 }
 
-model RaidCategory {
+// 상위탭. 예: "미카엘라", "디레지에" — 각각 아래에 일반/하드/쌀 같은 카테고리를 따로 둔다.
+// 같은 캐릭터는 같은 그룹 안에서는 기수 하나에만 배치될 수 있다(그룹 간에는 독립) — RaidSlot 저장 시
+// raid-teams.service.ts에서 강제한다(스키마 제약이 아니라 애플리케이션 레벨, 그룹을 넘나드는
+// 복합 unique를 DB에서 표현하기 번거로워서).
+model RaidGroup {
   id        String   @id @default(uuid())
-  label     String   // "일반", "하드", "쌀" 등
+  label     String
   order     Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  categories RaidCategory[]
+
+  @@unique([label])
+}
+
+model RaidCategory {
+  id        String    @id @default(uuid())
+  groupId   String
+  group     RaidGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  label     String    // "일반", "하드", "쌀" 등
+  order     Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
   partyTemplates CategoryPartyTemplate[]
   raidTeams      RaidTeam[]
 
-  @@unique([label])
+  @@unique([groupId, label])
+  @@index([groupId])
 }
 
 // 카테고리(탭)에 속한 "파티 템플릿" — 새 기수 생성 시 이 정의를 스냅샷으로 복사한다 (D10, D11)

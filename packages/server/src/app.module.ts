@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { CharactersModule } from './characters/characters.module';
+import { RaidGroupsModule } from './raid-groups/raid-groups.module';
 import { RaidCategoriesModule } from './raid-categories/raid-categories.module';
 import { RaidTeamsModule } from './raid-teams/raid-teams.module';
 import { LogsModule } from './logs/logs.module';
@@ -13,6 +14,7 @@ import { LogsModule } from './logs/logs.module';
     PrismaModule,
     AuthModule,
     CharactersModule,
+    RaidGroupsModule,
     RaidCategoriesModule,
     RaidTeamsModule,
     LogsModule,

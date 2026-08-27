@@ -1,56 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRaidCategories } from "../../lib/hooks";
+import { useRaidGroups, useRaidCategories } from "../../lib/hooks";
 import { useRaidDraftStore } from "../../lib/store/raidDraftStore";
-import {
-  getRaidTeam,
-  listRaidTeams,
-  createRaidTeam,
-  deleteRaidTeam,
-  saveRaidTeam,
-} from "../../lib/api/raidTeams";
+import { deleteRaidGroup } from "../../lib/api/raidGroups";
+import { listRaidTeams, createRaidTeam } from "../../lib/api/raidTeams";
 import { deleteRaidCategory } from "../../lib/api/raidCategories";
-import { ApiError } from "../../lib/api/client";
-import { Adventure, RaidCategory, RaidTeam } from "../../lib/types";
-import {
-  usePartyCompositionRule,
-  validateRaidTeam,
-} from "../../lib/validation/partyComposition";
-import { RaidBoard } from "./RaidBoard";
+import { Adventure, RaidCategory, RaidGroup } from "../../lib/types";
+import { RaidGenerationSection } from "./RaidGenerationSection";
 import { RaidCategoryFormModal } from "./RaidCategoryFormModal";
-import { ConflictResolutionModal } from "./ConflictResolutionModal";
+import { RaidGroupFormModal } from "./RaidGroupFormModal";
 import { logAction } from "../../lib/logging/logAction";
 
-export function RaidPanel({
-  adventure,
-  onSlotsChange,
-}: {
-  adventure: Adventure;
-  // 좌측 캐릭터 패널의 "배치됨" 배지 표시용으로 현재 보드의 배치 캐릭터 id를 올려보낸다
-  onSlotsChange: (
-    placedIds: Set<string>,
-    generationLabel: string | null,
-  ) => void;
-}) {
+export function RaidPanel({ adventure }: { adventure: Adventure }) {
   const queryClient = useQueryClient();
-  const { data: categories } = useRaidCategories();
-  // 명시적으로 고른 탭/기수가 없거나(또는 삭제 등으로 더 이상 존재하지 않으면) 첫 번째 항목으로 렌더링 중 계산한다
-  // (effect + setState로 "기본 선택"을 흉내내지 않는다)
+  const { data: groups } = useRaidGroups();
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
     null,
   );
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [groupFormTarget, setGroupFormTarget] = useState<
+    "new" | RaidGroup | null
+  >(null);
   const [categoryFormTarget, setCategoryFormTarget] = useState<
     "new" | RaidCategory | null
   >(null);
-  const [conflict, setConflict] = useState<RaidTeam | null>(null);
-  const rule = usePartyCompositionRule();
-  const draft = useRaidDraftStore();
+  const drafts = useRaidDraftStore((s) => s.drafts);
+
+  const groupId =
+    (selectedGroupId && groups?.some((g) => g.id === selectedGroupId)
+      ? selectedGroupId
+      : null) ??
+    groups?.[0]?.id ??
+    null;
+
+  const { data: categories } = useRaidCategories(groupId);
 
   const categoryId =
-    (selectedCategoryId && categories?.some((c) => c.id === selectedCategoryId)
+    (selectedCategoryId &&
+    categories?.some((c) => c.id === selectedCategoryId)
       ? selectedCategoryId
       : null) ??
     categories?.[0]?.id ??
@@ -62,31 +51,13 @@ export function RaidPanel({
     enabled: !!categoryId,
   });
 
-  const teamId =
-    (selectedTeamId && teams?.some((t) => t.id === selectedTeamId)
-      ? selectedTeamId
-      : null) ??
-    teams?.[0]?.id ??
-    null;
-
-  const { data: teamDetail } = useQuery({
-    queryKey: ["raid-team", teamId],
-    queryFn: () => getRaidTeam(teamId!),
-    enabled: !!teamId,
-  });
-
-  useEffect(() => {
-    if (teamDetail) draft.loadTeam(teamDetail);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamDetail]);
-
-  useEffect(() => {
-    const placed = new Set(
-      draft.slots.filter((s) => s.character).map((s) => s.character!.id),
-    );
-    onSlotsChange(placed, teamDetail?.generationLabel ?? null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.slots, teamDetail?.generationLabel]);
+  // 기수별 저장 함수 레지스트리 — 각 RaidGenerationSection이 자기 저장 mutate를 등록해두면
+  // "일괄 저장"은 그중 dirty한 것만 호출한다. 저장/충돌해결 로직은 그대로 섹션 쪽에 남겨두고
+  // (개별 저장 버튼도 동일 mutate를 씀) 여기선 트리거만 한다.
+  const saveFnsRef = useRef<Map<string, () => void>>(new Map());
+  const registerSave = useCallback((teamId: string, save: () => void) => {
+    saveFnsRef.current.set(teamId, save);
+  }, []);
 
   const createTeamMutation = useMutation({
     mutationFn: () => createRaidTeam(categoryId!),
@@ -94,7 +65,6 @@ export function RaidPanel({
       await queryClient.invalidateQueries({
         queryKey: ["raid-teams", categoryId],
       });
-      setSelectedTeamId(team.id);
       await logAction({
         actionType: "RAID_TEAM_CREATE",
         result: "SUCCESS",
@@ -106,28 +76,21 @@ export function RaidPanel({
       logAction({ actionType: "RAID_TEAM_CREATE", result: "FAILURE" }),
   });
 
-  const deleteTeamMutation = useMutation({
-    mutationFn: (id: string) => deleteRaidTeam(id),
-    onSuccess: async (_d, id) => {
-      await queryClient.invalidateQueries({
-        queryKey: ["raid-teams", categoryId],
-      });
-      setSelectedTeamId(null);
-      await logAction({
-        actionType: "RAID_TEAM_DELETE",
-        result: "SUCCESS",
-        targetType: "RaidTeam",
-        targetId: id,
-      });
+  const deleteGroupMutation = useMutation({
+    mutationFn: (id: string) => deleteRaidGroup(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["raid-groups"] });
+      setSelectedGroupId(null);
+      setSelectedCategoryId(null);
     },
-    onError: () =>
-      logAction({ actionType: "RAID_TEAM_DELETE", result: "FAILURE" }),
   });
 
   const deleteCategoryMutation = useMutation({
     mutationFn: (id: string) => deleteRaidCategory(id),
     onSuccess: async (_d, id) => {
-      await queryClient.invalidateQueries({ queryKey: ["raid-categories"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["raid-categories", groupId],
+      });
       setSelectedCategoryId(null);
       await logAction({
         actionType: "RAID_CATEGORY_DELETE",
@@ -140,217 +103,193 @@ export function RaidPanel({
       logAction({ actionType: "RAID_CATEGORY_DELETE", result: "FAILURE" }),
   });
 
-  const saveMutation = useMutation({
-    mutationFn: () =>
-      saveRaidTeam(
-        draft.teamId!,
-        draft.baseVersion,
-        draft.slots.map((s) => ({
-          slotId: s.id,
-          characterId: s.character?.id ?? null,
-        })),
-      ),
-    onSuccess: async (team) => {
-      draft.applyServerSlots(team);
-      queryClient.setQueryData(["raid-team", team.id], team);
-      await queryClient.invalidateQueries({
-        queryKey: ["raid-teams", categoryId],
-      });
-      await logAction({
-        actionType: "RAID_TEAM_SAVE",
-        result: "SUCCESS",
-        targetType: "RaidTeam",
-        targetId: team.id,
-        metadata: { conflict: false },
-      });
-    },
-    onError: async (err) => {
-      if (
-        err instanceof ApiError &&
-        err.body.errorCode === "RAID_TEAM_VERSION_CONFLICT"
-      ) {
-        setConflict(
-          (err.body.details as { latestRaidTeam: RaidTeam }).latestRaidTeam,
-        );
-      }
-      await logAction({
-        actionType: "RAID_TEAM_SAVE",
-        result: "FAILURE",
-        targetType: "RaidTeam",
-        targetId: draft.teamId ?? undefined,
-        metadata: {
-          conflict:
-            err instanceof ApiError &&
-            err.body.errorCode === "RAID_TEAM_VERSION_CONFLICT",
-        },
-      });
-    },
-  });
-
-  const selectedCategory = categories?.find((c) => c.id === categoryId) ?? null;
-  const { partyIssues, duplicateAdventures } = teamDetail
-    ? validateRaidTeam(draft.slots, [], rule)
-    : { partyIssues: {}, duplicateAdventures: [] };
+  const selectedGroup = groups?.find((g) => g.id === groupId) ?? null;
+  const selectedCategory =
+    categories?.find((c) => c.id === categoryId) ?? null;
+  const dirtyTeamIds = (teams ?? [])
+    .filter((t) => drafts[t.id]?.dirty)
+    .map((t) => t.id);
+  const handleSaveAll = () => {
+    for (const id of dirtyTeamIds) saveFnsRef.current.get(id)?.();
+  };
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      {/* 5.2.1: 탭 */}
-      <div className="flex items-center gap-1 border-b border-zinc-200 px-3 pt-2 dark:border-zinc-800">
-        {categories?.map((c) => (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* 상위탭 */}
+      <div className="flex items-center gap-1 border-b border-zinc-200 bg-zinc-50 px-3 pt-2 dark:border-zinc-800 dark:bg-zinc-950">
+        {groups?.map((g) => (
           <button
-            key={c.id}
-            onClick={() => setSelectedCategoryId(c.id)}
+            key={g.id}
+            onClick={() => {
+              setSelectedGroupId(g.id);
+              setSelectedCategoryId(null);
+            }}
             className={`rounded-t-lg px-3 py-1.5 text-sm ${
-              c.id === categoryId
-                ? "bg-white font-medium text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50"
+              g.id === groupId
+                ? "bg-white font-semibold text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50"
                 : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
             }`}
           >
-            {c.label}
+            {g.label}
           </button>
         ))}
         {adventure.isAdmin && (
           <button
-            onClick={() => setCategoryFormTarget("new")}
+            onClick={() => setGroupFormTarget("new")}
             className="ml-1 rounded-full px-2 text-sm text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
           >
             +
           </button>
         )}
-        {adventure.isAdmin && selectedCategory && (
+        {adventure.isAdmin && selectedGroup && (
           <div className="ml-auto flex gap-2 pb-1 text-xs text-zinc-400">
             <button
-              onClick={() => setCategoryFormTarget(selectedCategory)}
+              onClick={() => setGroupFormTarget(selectedGroup)}
               className="hover:text-zinc-700 dark:hover:text-zinc-200"
             >
-              탭 수정
+              상위탭 수정
             </button>
             <button
               onClick={() => {
                 if (
                   confirm(
-                    `"${selectedCategory.label}" 탭을 삭제하면 소속된 모든 기수가 함께 삭제됩니다. 계속할까요?`,
+                    `"${selectedGroup.label}" 상위탭을 삭제하면 소속된 모든 카테고리·기수가 함께 삭제됩니다. 계속할까요?`,
                   )
                 )
-                  deleteCategoryMutation.mutate(selectedCategory.id);
+                  deleteGroupMutation.mutate(selectedGroup.id);
               }}
               className="hover:text-red-600"
             >
-              탭 삭제
+              상위탭 삭제
             </button>
           </div>
         )}
       </div>
 
-      {/* 5.2.2: 기수 선택 */}
-      <div className="flex items-center gap-1 overflow-x-auto border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-        {teams?.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setSelectedTeamId(t.id)}
-            className={`shrink-0 rounded-full px-3 py-1 text-xs ${
-              t.id === teamId
-                ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
-                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-            }`}
-          >
-            {t.generationLabel}
-            {adventure.isAdmin && t.id === teamId && (
-              <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm(`"${t.generationLabel}"를 삭제할까요?`))
-                    deleteTeamMutation.mutate(t.id);
-                }}
-                className="ml-1.5 opacity-70 hover:opacity-100"
+      {groups?.length === 0 && (
+        <p className="p-3 text-sm text-zinc-400">
+          {adventure.isAdmin
+            ? "상위탭이 없습니다. + 버튼으로 먼저 만들어주세요 (예: 미카엘라)."
+            : "아직 생성된 상위탭이 없습니다."}
+        </p>
+      )}
+
+      {groupId && (
+        <>
+          {/* 5.2.1: 카테고리(하위탭) */}
+          <div className="flex items-center gap-1 border-b border-zinc-200 px-3 pt-2 dark:border-zinc-800">
+            {categories?.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setSelectedCategoryId(c.id)}
+                className={`rounded-t-lg px-3 py-1.5 text-sm ${
+                  c.id === categoryId
+                    ? "bg-white font-medium text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50"
+                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                }`}
               >
-                ✕
-              </span>
+                {c.label}
+              </button>
+            ))}
+            {adventure.isAdmin && (
+              <button
+                onClick={() => setCategoryFormTarget("new")}
+                className="ml-1 rounded-full px-2 text-sm text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+              >
+                +
+              </button>
             )}
-          </button>
-        ))}
-        {adventure.isAdmin && categoryId && (
-          <button
-            onClick={() => createTeamMutation.mutate()}
-            disabled={createTeamMutation.isPending}
-            className="shrink-0 rounded-full border border-dashed border-zinc-300 px-3 py-1 text-xs text-zinc-500 dark:border-zinc-700"
-          >
-            + 새 기수
-          </button>
-        )}
-        {teams?.length === 0 && (
-          <p className="text-xs text-zinc-400">아직 생성된 기수가 없습니다.</p>
-        )}
-      </div>
+            {adventure.isAdmin && selectedCategory && (
+              <div className="ml-auto flex gap-2 pb-1 text-xs text-zinc-400">
+                <button
+                  onClick={() => setCategoryFormTarget(selectedCategory)}
+                  className="hover:text-zinc-700 dark:hover:text-zinc-200"
+                >
+                  탭 수정
+                </button>
+                <button
+                  onClick={() => {
+                    if (
+                      confirm(
+                        `"${selectedCategory.label}" 탭을 삭제하면 소속된 모든 기수가 함께 삭제됩니다. 계속할까요?`,
+                      )
+                    )
+                      deleteCategoryMutation.mutate(selectedCategory.id);
+                  }}
+                  className="hover:text-red-600"
+                >
+                  탭 삭제
+                </button>
+              </div>
+            )}
+          </div>
 
-      {/* 5.2.4: 유효성 배너 */}
-      {duplicateAdventures.length > 0 && (
-        <div className="mx-3 mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          동일 모험단이 중복 배치되어 있습니다:{" "}
-          {duplicateAdventures
-            .map((d) => d.characterNames.join(", "))
-            .join(" / ")}
-        </div>
-      )}
-
-      {/* 5.2.3: 보드 */}
-      <div className="flex-1 overflow-y-auto p-3">
-        {teamDetail ? (
-          <RaidBoard
-            parties={teamDetail.parties}
-            slots={draft.slots}
-            partyIssues={partyIssues}
-          />
-        ) : (
-          <p className="text-sm text-zinc-400">
-            {teams?.length
-              ? "기수를 선택해주세요."
-              : "기수를 먼저 생성해주세요."}
-          </p>
-        )}
-      </div>
-
-      {teamDetail && (
-        <div className="flex items-center justify-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
-          {draft.dirty && (
-            <span className="text-xs text-amber-600">
-              저장하지 않은 변경사항이 있습니다.
-            </span>
+          {categoryId && (
+            <div className="flex items-center justify-end gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+              {dirtyTeamIds.length > 0 && (
+                <span className="mr-auto text-xs text-amber-600">
+                  저장하지 않은 기수 {dirtyTeamIds.length}개
+                </span>
+              )}
+              {(teams?.length ?? 0) > 0 && (
+                <button
+                  onClick={handleSaveAll}
+                  disabled={dirtyTeamIds.length === 0}
+                  className="rounded-lg bg-zinc-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900"
+                >
+                  전체 저장
+                </button>
+              )}
+              {adventure.isAdmin && (
+                <button
+                  onClick={() => createTeamMutation.mutate()}
+                  disabled={createTeamMutation.isPending}
+                  className="shrink-0 rounded-full border border-dashed border-zinc-300 px-3 py-1 text-xs text-zinc-500 dark:border-zinc-700"
+                >
+                  + 새 기수
+                </button>
+              )}
+            </div>
           )}
-          <button
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending || !draft.dirty}
-            className="rounded-lg bg-zinc-900 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900"
-          >
-            {saveMutation.isPending ? "저장 중..." : "저장"}
-          </button>
-        </div>
+
+          {/* 5.2.2/5.2.3: 기수를 탭으로 나누지 않고 세로로 나열, 이 영역 하나에서만 스크롤 */}
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+            {categoryId &&
+              teams?.map((t) => (
+                <RaidGenerationSection
+                  key={t.id}
+                  team={t}
+                  categoryId={categoryId}
+                  adventure={adventure}
+                  registerSave={registerSave}
+                />
+              ))}
+            {categoryId && teams?.length === 0 && (
+              <p className="text-sm text-zinc-400">아직 생성된 기수가 없습니다.</p>
+            )}
+            {!categoryId && categories?.length === 0 && (
+              <p className="text-sm text-zinc-400">
+                아직 생성된 카테고리(하위탭)가 없습니다.
+              </p>
+            )}
+          </div>
+        </>
       )}
 
-      {categoryFormTarget && (
+      {groupFormTarget && (
+        <RaidGroupFormModal
+          group={groupFormTarget === "new" ? undefined : groupFormTarget}
+          onClose={() => setGroupFormTarget(null)}
+        />
+      )}
+
+      {categoryFormTarget && groupId && (
         <RaidCategoryFormModal
           category={
             categoryFormTarget === "new" ? undefined : categoryFormTarget
           }
+          groupId={groupId}
           onClose={() => setCategoryFormTarget(null)}
-        />
-      )}
-
-      {conflict && (
-        <ConflictResolutionModal
-          latest={conflict}
-          localSlots={draft.slots}
-          onClose={() => setConflict(null)}
-          onUseServer={() => {
-            draft.applyServerSlots(conflict);
-            queryClient.setQueryData(["raid-team", conflict.id], conflict);
-            setConflict(null);
-          }}
-          onRetryWithLocal={() => {
-            draft.bumpBaseVersion(conflict.version);
-            setConflict(null);
-            saveMutation.mutate();
-          }}
         />
       )}
     </div>

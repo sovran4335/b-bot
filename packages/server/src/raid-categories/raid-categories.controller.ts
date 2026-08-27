@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { RaidCategoriesService } from './raid-categories.service';
@@ -22,8 +23,10 @@ export class RaidCategoriesController {
   constructor(private readonly raidCategoriesService: RaidCategoriesService) {}
 
   @Get()
-  async findAll(): Promise<RaidCategoryDto[]> {
-    const categories = await this.raidCategoriesService.findAll();
+  async findAll(
+    @Query('groupId') groupId?: string,
+  ): Promise<RaidCategoryDto[]> {
+    const categories = await this.raidCategoriesService.findAll(groupId);
     return categories.map(toRaidCategoryDto);
   }
 

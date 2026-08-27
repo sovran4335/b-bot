@@ -2,6 +2,7 @@ import { CategoryPartyTemplate, RaidCategory } from '@prisma/client';
 
 export interface RaidCategoryDto {
   id: string;
+  groupId: string;
   label: string;
   order: number;
   partyTemplate: {
@@ -17,6 +18,7 @@ export function toRaidCategoryDto(
 ): RaidCategoryDto {
   return {
     id: category.id,
+    groupId: category.groupId,
     label: category.label,
     order: category.order,
     partyTemplate: category.partyTemplates

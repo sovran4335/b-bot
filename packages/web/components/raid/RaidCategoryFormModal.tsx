@@ -17,9 +17,11 @@ interface FormValues {
 
 export function RaidCategoryFormModal({
   category,
+  groupId,
   onClose,
 }: {
   category?: RaidCategory; // 없으면 신규 생성
+  groupId: string; // 신규 생성 시 소속시킬 상위탭
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -37,7 +39,14 @@ export function RaidCategoryFormModal({
             colorHex: p.colorHex ?? undefined,
           })),
         }
-      : { label: "", partyTemplate: [{ label: "" }] },
+      : {
+          label: "",
+          partyTemplate: [
+            { label: "레드", colorHex: "#ef4444" },
+            { label: "옐로", colorHex: "#eab308" },
+            { label: "그린", colorHex: "#22c55e" },
+          ],
+        },
   });
   // 파티 2~6개 수준의 짧은 리스트라 dnd 대신 위/아래 버튼으로 순서 변경 (5.2.1)
   const { fields, append, remove, swap } = useFieldArray({
@@ -49,9 +58,11 @@ export function RaidCategoryFormModal({
     mutationFn: (values: FormValues) =>
       category
         ? updateRaidCategory(category.id, values)
-        : createRaidCategory(values),
+        : createRaidCategory({ ...values, groupId }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["raid-categories"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["raid-categories", groupId],
+      });
       await logAction({
         actionType: category ? "RAID_CATEGORY_UPDATE" : "RAID_CATEGORY_CREATE",
         result: "SUCCESS",

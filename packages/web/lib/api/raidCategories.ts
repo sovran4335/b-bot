@@ -6,10 +6,13 @@ export interface PartyTemplateInput {
   colorHex?: string;
 }
 
-export const listRaidCategories = () =>
-  apiGet<RaidCategory[]>("/raid-categories");
+export const listRaidCategories = (groupId: string) =>
+  apiGet<RaidCategory[]>(
+    `/raid-categories?groupId=${encodeURIComponent(groupId)}`,
+  );
 
 export const createRaidCategory = (data: {
+  groupId: string;
   label: string;
   partyTemplate: PartyTemplateInput[];
 }) => apiPost<RaidCategory>("/raid-categories", data);

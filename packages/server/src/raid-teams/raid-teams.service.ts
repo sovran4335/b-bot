@@ -103,6 +103,17 @@ export class RaidTeamsService {
   // 6.5: 조건부 업데이트 한 방으로 낙관적 락 처리 (스펙 "구현 메모"의 기본 권장 방식)
   async save(id: string, dto: SaveRaidTeamDto): Promise<RaidTeamDetailDto> {
     return this.prisma.$transaction(async (tx) => {
+      const teamCategory = await tx.raidTeam.findUnique({
+        where: { id },
+        select: { category: { select: { groupId: true } } },
+      });
+      if (!teamCategory)
+        throw new AppException(
+          404,
+          'NOT_FOUND',
+          '공대표 기수를 찾을 수 없습니다.',
+        );
+
       const result = await tx.raidTeam.updateMany({
         where: { id, version: dto.baseVersion },
         data: { version: { increment: 1 }, updatedAt: new Date() },
@@ -160,6 +171,31 @@ export class RaidTeamsService {
             'INVALID_CHARACTER_ID',
             '존재하지 않는 캐릭터가 포함되어 있습니다.',
           );
+        }
+
+        // 그룹 내 유일 배치: 같은 그룹의 다른 기수에 이미 있던 캐릭터면 그쪽 슬롯은 비운다(이동).
+        // 같은 기수 내 중복은 프론트가 저장 전에 이미 정리해서 보내므로 여기선 다른 기수만 본다.
+        const duplicates = await tx.raidSlot.findMany({
+          where: {
+            characterId: { in: characterIds },
+            raidTeamId: { not: id },
+            raidTeam: { category: { groupId: teamCategory.category.groupId } },
+          },
+          select: { id: true, raidTeamId: true },
+        });
+        if (duplicates.length > 0) {
+          await tx.raidSlot.updateMany({
+            where: { id: { in: duplicates.map((d) => d.id) } },
+            data: { characterId: null },
+          });
+          // 영향받은 다른 기수들의 version도 올려서, 그쪽을 열어둔 사용자가 있으면 낙관적 락 충돌로 감지되게 한다
+          const affectedTeamIds = [
+            ...new Set(duplicates.map((d) => d.raidTeamId)),
+          ];
+          await tx.raidTeam.updateMany({
+            where: { id: { in: affectedTeamIds } },
+            data: { version: { increment: 1 }, updatedAt: new Date() },
+          });
         }
       }
 

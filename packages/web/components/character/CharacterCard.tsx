@@ -2,7 +2,10 @@
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CharacterCard as CharacterCardType } from "../../lib/types";
+import {
+  CharacterCard as CharacterCardType,
+  CharacterPlacement,
+} from "../../lib/types";
 import { CharacterAvatar } from "./CharacterAvatar";
 import Image from "next/image";
 import CharacterTypeIcon from "./CharacterTypeIcon";
@@ -11,12 +14,12 @@ const ROLE_LABEL: Record<string, string> = { DEALER: "딜러", BUFFER: "버퍼" 
 
 export function CharacterCard({
   character,
-  placedAt,
+  placements,
   onEdit,
   onDelete,
 }: {
   character: CharacterCardType;
-  placedAt?: string | null;
+  placements: CharacterPlacement[];
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -59,11 +62,6 @@ export function CharacterCard({
           <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
             {ROLE_LABEL[character.role]}
           </span>
-          {placedAt && (
-            <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-              배치됨 · {placedAt}
-            </span>
-          )}
         </div>
         <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
           {character.job}
@@ -72,7 +70,18 @@ export function CharacterCard({
           <CharacterTypeIcon jobType={character.role}  />
           <span className="truncate text-[12px] font-bold text-[#3392ff]">{character.score.toLocaleString()}</span>
         </div>
-        
+        {placements.length > 0 && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            {placements.map((p) => (
+              <span
+                key={p.groupLabel + p.categoryLabel}
+                className="rounded bg-emerald-50 px-1 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+              >
+                {p.groupLabel} {p.categoryLabel}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <button
         onClick={onEdit}

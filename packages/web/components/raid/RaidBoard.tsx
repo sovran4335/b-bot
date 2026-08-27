@@ -7,10 +7,10 @@ import { CharacterAvatar } from "../character/CharacterAvatar";
 import CharacterTypeIcon from "../character/CharacterTypeIcon";
 import { useRaidDraftStore } from "../../lib/store/raidDraftStore";
 
-function RaidSlotCell({ slot }: { slot: RaidSlot }) {
+function RaidSlotCell({ slot, teamId }: { slot: RaidSlot; teamId: string }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: slot.id,
-    data: { type: "slot", slot },
+    data: { type: "slot", slot, teamId },
   });
   const {
     attributes,
@@ -20,7 +20,7 @@ function RaidSlotCell({ slot }: { slot: RaidSlot }) {
   } = useDraggable({
     id: `slotchar:${slot.id}`,
     data: slot.character
-      ? { type: "slot-character", slot, character: slot.character }
+      ? { type: "slot-character", slot, character: slot.character, teamId }
       : undefined,
     disabled: !slot.character,
   });
@@ -49,7 +49,7 @@ function RaidSlotCell({ slot }: { slot: RaidSlot }) {
               ⠿
             </button>
             <div className="border border-zinc-600 rounded-lg relative">
-              {   
+              {
                 slot.character.adventureName && (
                   <span className="absolute whitespace-nowrap -translate-y-1/2 left-1/2 -translate-x-1/2 z-1 rounded border-zinc-600 border bg-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300">
                     {slot.character.adventureName}
@@ -79,7 +79,7 @@ function RaidSlotCell({ slot }: { slot: RaidSlot }) {
             </div>
           </div>
           <button
-            onClick={() => clearSlot(slot.id)}
+            onClick={() => clearSlot(teamId, slot.id)}
             className="shrink-0 px-1 text-zinc-400 hover:text-red-600"
             aria-label="현재 기수에서 제거"
           >
@@ -93,15 +93,28 @@ function RaidSlotCell({ slot }: { slot: RaidSlot }) {
   );
 }
 
+// 파티(레드/옐로/그린 등)의 평균 장비점수. 버퍼는 score가 "버프력"이라 장비점수 평균에 섞으면
+// 의미가 왜곡되므로 딜러만 집계한다 [가정]. 딜러가 하나도 없으면 표시하지 않는다.
+function averageDealerScore(slots: RaidSlot[]): number | null {
+  const scores = slots
+    .filter((s) => s.character && s.character.role === "DEALER")
+    .map((s) => s.character!.score);
+  if (scores.length === 0) return null;
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
+
 function RaidPartyGroup({
   party,
   slots,
   issues,
+  teamId,
 }: {
   party: PartyDefinition;
   slots: RaidSlot[];
   issues: PartyValidationIssue[];
+  teamId: string;
 }) {
+  const avgScore = averageDealerScore(slots);
   return (
     <div className="min-w-[280px] rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
       <div className="mb-2 flex items-center gap-2">
@@ -120,12 +133,18 @@ function RaidPartyGroup({
             ⚠
           </span>
         )}
+        {avgScore !== null && (
+          <div className="ml-auto flex gap-1">
+            <img src="/ico_equi.png" />
+            <span className="text-[12px] font-bold text-[#3392ff]">{avgScore.toLocaleString()}</span>
+          </div>
+        )}
       </div>
       <div className="space-y-1.5">
         {slots
           .sort((a, b) => a.slotInParty - b.slotInParty)
           .map((slot) => (
-            <RaidSlotCell key={slot.id} slot={slot} />
+            <RaidSlotCell key={slot.id} slot={slot} teamId={teamId} />
           ))}
       </div>
     </div>
@@ -133,10 +152,12 @@ function RaidPartyGroup({
 }
 
 export function RaidBoard({
+  teamId,
   parties,
   slots,
   partyIssues,
 }: {
+  teamId: string;
   parties: PartyDefinition[];
   slots: RaidSlot[];
   partyIssues: Record<string, PartyValidationIssue[]>;
@@ -151,6 +172,7 @@ export function RaidBoard({
             party={party}
             slots={slots.filter((s) => s.partyId === party.id)}
             issues={partyIssues[party.id] ?? []}
+            teamId={teamId}
           />
         ))}
       {parties.length === 0 && (

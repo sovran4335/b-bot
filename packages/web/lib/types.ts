@@ -52,11 +52,28 @@ export interface PartyDefinition {
 
 export const PARTY_SIZE = 4 as const; // D10: 파티 인원수는 항상 4명 고정
 
-export interface RaidCategory {
+// 상위탭. 예: "미카엘라", "디레지에" — 아래에 일반/하드/쌀 같은 카테고리를 따로 둔다.
+// 같은 캐릭터는 같은 그룹 안에서는 기수 하나에만 배치될 수 있다(서버가 저장 시점에 강제).
+export interface RaidGroup {
   id: string;
   label: string;
   order: number;
+}
+
+export interface RaidCategory {
+  id: string;
+  groupId: string;
+  label: string;
+  order: number;
   partyTemplate: PartyDefinition[];
+}
+
+// 좌측 캐릭터 패널 "배치됨" 배지용
+export interface CharacterPlacement {
+  characterId: string;
+  groupLabel: string;
+  categoryLabel: string;
+  generationLabel: string;
 }
 
 export interface RaidSlot {

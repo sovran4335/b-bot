@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AppException } from '../common/app-exception';
 import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
+import { CharacterPlacementDto } from './dto/character-placement.dto';
 import { NeopleCharacterService } from './neople-character.service';
 import { NexonScoreService } from './nexon-score.service';
 
@@ -136,6 +137,30 @@ export class CharactersService {
       ),
     );
     return this.findAllForAdventure(adventureId);
+  }
+
+  // 좌측 패널 "배치됨" 배지용: 이 모험단 캐릭터들이 현재 어느 그룹/카테고리/기수에 있는지
+  async findPlacements(adventureId: string): Promise<CharacterPlacementDto[]> {
+    const slots = await this.prisma.raidSlot.findMany({
+      where: { character: { adventureId } },
+      select: {
+        characterId: true,
+        raidTeam: {
+          select: {
+            generationLabel: true,
+            category: {
+              select: { label: true, group: { select: { label: true } } },
+            },
+          },
+        },
+      },
+    });
+    return slots.map((s) => ({
+      characterId: s.characterId!, // where 조건상 character 관계가 있으므로 항상 존재
+      groupLabel: s.raidTeam.category.group.label,
+      categoryLabel: s.raidTeam.category.label,
+      generationLabel: s.raidTeam.generationLabel,
+    }));
   }
 
   private async assertOwner(

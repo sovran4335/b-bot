@@ -10,6 +10,10 @@ import { PartyTemplateItemDto } from './party-template-item.dto';
 export class CreateRaidCategoryDto {
   @IsString()
   @IsNotEmpty()
+  groupId!: string;
+
+  @IsString()
+  @IsNotEmpty()
   label!: string;
 
   @ArrayNotEmpty() // [가정: 파티가 0개인 탭은 의미가 없으므로] (5.2)

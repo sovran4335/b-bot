@@ -92,9 +92,18 @@ interface CharacterCard {
   jobId: string | null; // [D15] Neople 직업 대분류 id, jobCategories.ts의 JobId와 대응 (지금은 표시에 안 씀, 이미지 프레이밍 보정용으로 CharacterAvatar에 흘려보냄)
 }
 
-// 공대표 카테고리 (탭)
+// 공대표 상위탭 (2026-08-27 추가). "미카엘라", "디레지에" 등 — 관리자가 언제든 추가 가능
+interface RaidGroup {
+  id: string;
+  label: string;
+  order: number;
+}
+
+// 공대표 하위탭(카테고리). 같은 group 안에서만 label이 유일하면 됨 — "미카엘라-일반"과
+// "디레지에-일반"이 동시에 존재 가능
 interface RaidCategory {
   id: string;
+  groupId: string; // 소속 RaidGroup
   label: string; // "일반" | "하드" | "쌀" 등, 관리자가 추가/삭제 가능
   order: number;
   partyTemplate: PartyDefinition[]; // [D10] 이 카테고리에서 "새로" 생성되는 기수가 기본으로 갖는 파티 구성
@@ -129,7 +138,22 @@ interface RaidSlot {
   slotInParty: number; // 0 ~ (PARTY_SIZE-1), 파티 내 표시 순서
   characterId: string | null;
 }
+
+// 좌측 캐릭터 패널 "배치됨" 배지용 (2026-08-27 추가). GET /characters/placements 응답.
+// 그룹 내 유일 배치 규칙상 그룹당 최대 1개, 여러 그룹에 걸쳐 있을 수 있음.
+interface CharacterPlacement {
+  characterId: string;
+  groupLabel: string;
+  categoryLabel: string;
+  generationLabel: string;
+}
 ```
+
+**그룹 내 유일 배치 규칙 (2026-08-27 추가)**: 같은 캐릭터는 같은 `RaidGroup` 안에서는 기수(RaidTeam) 하나에만
+배치될 수 있다 — 카테고리가 달라도 마찬가지(미카엘라-일반에 있으면 미카엘라-하드엔 못 들어감). 그룹이
+다르면 독립이라 미카엘라와 디레지에에 동시에 배치되는 건 정상. 서버가 저장(`PUT /raid-teams/:id`)
+시점에 강제하며, 이미 다른 기수에 있던 캐릭터를 새 슬롯에 놓으면 그쪽은 자동으로 비워진다(이동) —
+프론트는 별도 확인 없이 조용히 처리한다(기존 "같은 기수 내 이동" UX와 동일한 톤).
 
 > **확장성 메모**: 파티 개수는 `RaidTeam.parties.length`로 결정되므로 "레드/옐로만" 또는 "레드/옐로/그린/블루" 등
 > 카테고리별로 자유롭게 구성 가능하다. 프론트 어디에도 파티 개수를 `3`으로 하드코딩하지 않는다
@@ -243,38 +267,70 @@ interface RaidSlot {
   - 드래그 종료 시 `order` 재계산 후 `PATCH /api/characters/reorder` (배열 전체 순서 전송) — **실시간 반영**(디바운스 300ms 권장, 요구사항 3.6 "실시간으로 서버에 반영")
   - 삭제 클릭 시 확인 다이얼로그 → `DELETE /api/characters/:id` → 성공 시 리스트에서 제거. **단, 해당 캐릭터가 현재 어떤 공대표 슬롯에 배치되어 있다면 그 슬롯도 함께 비워짐**을 안내 문구로 명시 (서버가 cascade 처리한다고 가정, 프론트는 관련 캐시 무효화만 수행)
   - 카드는 공대표 패널로 드래그 가능한 `Draggable` 소스로도 동작 (동일 dnd-kit 컨텍스트를 패널 간 공유하거나, `DndContext`를 상위 대시보드 레벨에 하나로 둠)
-  - 이미 특정 공대표에 배치된 캐릭터는 카드에 작은 배지("배치됨 · 일반 3기수")로 표시 [가정: 캐릭터는 여러 공대표에 동시에 배치 가능한지, 하나의 공대표에만 배치 가능한지 원문에 명시 없음 → **우선 여러 공대표에 동시 배치 가능**하다고 가정. 던파 특성상 같은 기수 내 중복 불가만 룰로 건다(요구사항 4.5는 "모험단 중복 불가"이지 "캐릭터가 여러 기수에 못 감" 규칙이 아님)]
+  - **배치됨 배지 (2026-08-27 갱신)**: `GET /characters/placements`로 받은 `CharacterPlacement[]`를 캐릭터별로
+    필터링해, 소속된 **그룹마다** 태그 하나씩 렌더 — 예: 미카엘라와 디레지에 둘 다 배치돼 있으면
+    "배치됨 [미카엘라 일반] [디레지에 하드]". 카드 안에서 이름/역할 배지 줄과 분리된 별도 줄에
+    `flex-wrap`으로 배치(그룹이 늘어나도 줄바꿈되게). 그룹 내 유일 배치 규칙 때문에 그룹당 태그는
+    최대 1개. [이전 가정 폐기: "카테고리(탭)마다 여러 기수 동시 배치 가능"은 이제 그룹 내에서는 불가 —
+    위 "그룹 내 유일 배치 규칙" 참고. 그룹이 다르면 여전히 동시 배치 가능]
 
-### 5.2 우측 — 공대표 패널
+### 5.2 우측 — 공대표 패널 (2026-08-27 갱신: 상위탭 도입, 기수는 탭 대신 스크롤)
 
-**컴포넌트**: `RaidTabs`, `RaidGenerationSelector`, `RaidBoard`, `RaidParty`, `RaidSlotCell`, `ValidationBanner`
+**계층**: 상위탭(`RaidGroup`, 예: 미카엘라/디레지에) → 하위탭(`RaidCategory`, 예: 일반/하드/쌀) →
+그 카테고리에 속한 **모든 기수를 탭 전환 없이 세로로 나열**, 이 목록 영역 하나에서만 스크롤.
+이전엔 기수도 pill 탭으로 하나씩 골라 보던 구조였으나, "1기수/2기수를 탭으로 나누지 말고 스크롤로"
+요청에 따라 폐지 — RaidGenerationSelector 컴포넌트도 함께 제거됨.
 
-#### 5.2.1 탭 (카테고리)
+**컴포넌트**: `RaidPanel`(상위탭+하위탭+저장 버튼 오케스트레이션), `RaidGroupFormModal`(상위탭 관리자
+CRUD), `RaidCategoryFormModal`(하위탭 관리자 CRUD), `RaidGenerationSection`(기수 하나 = 자기 데이터
+조회+로컬 드래프트+저장+삭제+충돌해결을 독립적으로 들고 있는 단위, 목록에 여러 개 동시에 마운트됨),
+`RaidBoard`, `RaidParty`, `RaidSlotCell`, `ConflictResolutionModal`
 
-- 상단 탭바: 일반 / 하드 / 쌀 ... (`RaidCategory[]` 기반, `label` 렌더)
-- 관리자에게만 탭 우측에 "+" (카테고리 추가), 각 탭 우클릭 또는 편집모드에서 "삭제" 버튼 노출
+#### 5.2.1 상위탭 (RaidGroup)
+
+- 카테고리 탭 위에 한 단 더 있는 탭바: 미카엘라 / 디레지에 ... (`RaidGroup[]` 기반, `label` 렌더)
+- 관리자에게만 "+" (상위탭 추가), 선택된 상위탭에는 "상위탭 수정"/"상위탭 삭제" 버튼 노출
+- **상위탭 생성/수정 모달(`RaidGroupFormModal`, 관리자 전용)**: 이름 입력 하나뿐(파티 구성은 하위탭 소관)
+- 상위탭 삭제 시 소속된 모든 하위탭·기수가 cascade로 함께 삭제됨을 confirm으로 경고
+- 상위탭 전환 시 하위탭 선택은 초기화(첫 번째 하위탭으로)
+
+#### 5.2.2 하위탭 (RaidCategory)
+
+- 선택된 상위탭 소속 카테고리만 탭으로 표시: 일반 / 하드 / 쌀 ... (`GET /raid-categories?groupId=`)
+- 관리자에게만 탭 우측에 "+" (카테고리 추가), 선택된 탭에 "탭 수정"/"탭 삭제" 버튼 노출
 - **카테고리 생성/수정 모달(`RaidCategoryFormModal`, 관리자 전용)**: 탭 이름 입력 + `partyTemplate` 편집기
+  (신규 생성 시 현재 선택된 `groupId`로 소속시킴)
   - 파티(색상) 목록을 추가("+파티 추가")/삭제/드래그로 순서 변경 가능한 리스트로 제공
   - 각 파티 항목: 라벨 텍스트 입력 + 색상 선택(선택사항, 미지정 시 자동 팔레트 할당)
   - 인원수(4명)는 고정값이라 이 화면에 노출하지 않음 (상수 `PARTY_SIZE` 사용)
   - **주의**: 여기서 템플릿을 수정해도 이미 생성된 기수에는 영향 없음 [D11] — 모달 하단에 안내 문구 표시("이 설정은 앞으로 생성되는 기수부터 적용됩니다")
-- 탭 클릭 시 해당 카테고리의 기수 목록을 `generationLabel` 오름차순(카테고리별 "라벨 N기수" 접두어 + 순번)으로 정렬해 하위 셀렉터에 표시
+- 같은 `label`이라도 상위탭이 다르면 별개 카테고리(미카엘라-일반 ≠ 디레지에-일반) — 유일성은 `groupId` 안에서만 검사
 
-#### 5.2.2 기수 선택
+#### 5.2.3 기수 목록 & 저장 (탭 없이 스크롤)
 
-- 탭 아래 가로 스크롤 chip 리스트: "일반 1기수", "일반 2기수", ...
+- 선택된 카테고리의 기수를 `generationLabel`/`generationIndex` 오름차순으로 **전부** 세로로 나열, 목록
+  영역 하나만 `overflow-y-auto` — 개별 기수 섹션 자체는 스크롤 안 되고 콘텐츠 높이만큼 자연스럽게 늘어남
+- 각 기수 섹션(`RaidGenerationSection`)은 독립적으로: `GET /raid-teams/:id`로 상세 조회, 로컬 드래프트,
+  자기 "저장" 버튼(dirty할 때만 활성화), 관리자 전용 "삭제" 버튼, 저장 충돌 시 자기 `ConflictResolutionModal`
+- 카테고리 헤더 행에 **"전체 저장" 버튼** — 현재 카테고리 안에서 dirty한 기수만 골라 한 번에 저장 트리거
+  (개별 저장 버튼과 완전히 같은 저장 로직을 재사용, 충돌 나면 그 기수 섹션의 모달이 그대로 뜸). 옆에
+  "저장하지 않은 기수 N개" 텍스트로 개수 표시
 - 관리자에게는 "+ 새 기수" 버튼 → 이름/라벨만 입력받아 즉시 생성 (서버 선택 없음 [D3]). 생성 시 서버가 현재 카테고리의 `partyTemplate`을 스냅샷으로 복사해 `RaidTeam.parties`에 저장한다 [D11]
-- 관리자에게는 각 기수 chip에 삭제(x) 버튼
 
-#### 5.2.3 보드 (RaidBoard)
+#### 5.2.4 보드 (RaidBoard)
 
-- 선택된 기수의 `parties` 배열을 순회하며 파티 그룹을 렌더 (개수 하드코딩 금지, 카테고리마다 2개일 수도 4개일 수도 있음)
+- 기수의 `parties` 배열을 순회하며 파티 그룹을 렌더 (개수 하드코딩 금지, 카테고리마다 2개일 수도 4개일 수도 있음)
 - 각 파티: `PARTY_SIZE`(4)개 슬롯을 세로/가로 카드로 표시. 비어있으면 점선 플레이스홀더, 채워지면 미니 캐릭터 카드(이름/직업/역할/점수)
-- 파티 헤더에는 `PartyDefinition.label`과 `colorHex` 기반 색상 배지를 렌더 (레드/옐로/그린을 문자열로 하드코딩하지 않음)
-- 슬롯은 `Droppable`, 좌측 캐릭터 카드 또는 다른 슬롯의 카드를 드래그해 이동/교체 가능
+- 파티 헤더에는 `PartyDefinition.label`과 `colorHex` 기반 색상 배지, 그리고 **평균 장비점수**(2026-08-27
+  추가)를 렌더 — 그 파티 슬롯에 배치된 **딜러만** 골라 `score` 평균(반올림)을 헤더 우측에 표시, 딜러가
+  하나도 없으면 표시 안 함 [가정: 버퍼 `score`는 "버프력"이라 딜러 장비점수와 단위가 달라 평균에 섞지
+  않음]. 레드/옐로/그린을 문자열로 하드코딩하지 않음
+- 슬롯은 `Droppable`, 좌측 캐릭터 카드 또는 다른 슬롯의 카드를 드래그해 이동/교체 가능. **다른 기수의
+  슬롯으로도 드래그 가능**(2026-08-27) — 같은 화면에 여러 기수가 동시에 떠 있으므로, 드롭 시 원래
+  슬롯은 비우고 대상 슬롯에 놓는다(기수 간 이동)
 - 슬롯에서 캐릭터 우클릭 또는 X 아이콘으로 슬롯에서 제거(캐릭터 자체는 삭제되지 않음, 배치만 해제)
 
-#### 5.2.4 유효성 배너 (`ValidationBanner`)
+#### 5.2.5 유효성 배너 (`ValidationBanner`)
 
 아래 두 검증을 클라이언트에서 실시간(드롭 직후) 계산해 배너/뱃지로 표시. **저장을 막지 않는다.**
 
@@ -330,7 +386,10 @@ function usePartyCompositionRule(): PartyCompositionRule {
 `validateRaidTeam(team, characters, rule): ValidationResult` 형태의 순수 함수로 전체 검증(파티별 규칙 + 모험단 중복)을
 조합하고, `rule`은 `usePartyCompositionRule()`에서 주입받는다. 유닛테스트는 규칙을 mock으로 교체해 검증한다.
 
-#### 5.2.5 저장 & 낙관적 락 플로우
+#### 5.2.6 저장 & 낙관적 락 플로우
+
+기수마다(`RaidGenerationSection`) 독립적으로 아래 플로우를 탄다. "전체 저장"(5.2.3)은 dirty한 기수들에
+대해 이 플로우를 각각 트리거하는 것뿐, 별도 배치 API 없음 — 하나가 충돌해도 나머지는 정상 진행된다.
 
 1. "저장" 버튼 클릭 시 로컬 드래프트(`localVersion` 스냅샷 시점의 `version`)와 함께 `PUT /api/raid-teams/:id` 요청, body에 `slots`, `baseVersion`(내가 불러온 시점의 version) 포함
 2. 서버 응답:
@@ -341,6 +400,10 @@ function usePartyCompositionRule(): PartyCompositionRule {
      - 유저가 슬롯 단위로 "서버 값 채택" / "내 값 유지"를 선택하거나, 버튼으로 "서버본으로 전체 교체" / "내 작업내용 유지 후 다시 저장 시도" 선택 가능
      - "다시 저장" 클릭 시 `baseVersion`을 최신 값으로 갱신해 1번부터 재시도 (즉 재시도 시에도 그 사이 또 누군가 저장했으면 다시 409 처리)
 3. 자동 폴링 또는 소켓 없이, **저장 시점에만** 충돌을 검사하는 것으로 충분 (요구사항에 실시간 동기화 요구 없음). 단, 기수를 열람 중 백그라운드에서 주기적으로 `version`만 가볍게 확인(polling, 예: 30초)해 "최신 변경사항이 있습니다, 새로고침" 배너를 띄우는 것은 선택 구현.
+4. **그룹 내 유일 배치 규칙과의 상호작용 (2026-08-27)**: 내가 저장한 캐릭터가 같은 그룹의 다른 기수에도
+   있었다면 서버가 그쪽 슬롯을 비우면서 그 기수의 `version`도 올린다. 그 다른 기수를 마침 열어보고 있던
+   사용자가 있으면, 그쪽에서 저장을 시도하는 순간 위 2번의 `409 Conflict` 경로로 자연스럽게 감지된다 —
+   별도의 실시간 알림 없이 기존 충돌 해결 모달로 흡수.
 
 컴포넌트: `ConflictResolutionModal`이 별도 파일로 존재해야 하며, `RaidSlotDiff` 서브컴포넌트로 슬롯별 차이(동일/추가/제거/변경)를 시각적으로 구분 (색상: 추가=초록, 제거=빨강, 변경=노랑).
 
@@ -451,15 +514,15 @@ DashboardPage
 │   │   ├── CharacterRefreshModal (갱신, df.nexon.com 동기화 미리보기)
 │   │   └── SortableContext
 │   │       └── CharacterCard[] (draggable, CharacterAvatar 포함)
-│   └── RaidPanel
-│       ├── RaidTabs
-│       ├── RaidGenerationSelector
-│       ├── ValidationBanner
-│       ├── RaidBoard
-│       │   └── RaidParty[] (parties.length개, 하드코딩 없음)
-│       │       └── RaidSlotCell x4 (PARTY_SIZE, droppable, CharacterAvatar 포함)
-│       └── ConflictResolutionModal (조건부 렌더)
-│       └── RaidCategoryFormModal (관리자, partyTemplate 편집 포함)
+│   └── RaidPanel (상위탭+하위탭 오케스트레이션, 2026-08-27 갱신)
+│       ├── RaidGroupFormModal (관리자, 상위탭 CRUD, 조건부 렌더)
+│       ├── RaidCategoryFormModal (관리자, partyTemplate 편집 포함, 조건부 렌더)
+│       └── RaidGenerationSection[] (선택된 카테고리의 기수마다 하나씩, 탭 아님 — 세로 스크롤 목록)
+│           ├── ValidationBanner
+│           ├── RaidBoard
+│           │   └── RaidParty[] (parties.length개, 하드코딩 없음, 평균 장비점수 표시)
+│           │       └── RaidSlotCell x4 (PARTY_SIZE, droppable, CharacterAvatar 포함)
+│           └── ConflictResolutionModal (조건부 렌더)
 
 AdminLogsPage (관리자 전용, 별도 라우트)
 ├── LogFilterBar
@@ -484,15 +547,20 @@ AdminLogsPage (관리자 전용, 별도 라우트)
 | PATCH  | /api/characters/reorder     | 순서 배열 일괄 갱신                                                  |
 | PATCH  | /api/characters/:id         | 캐릭터 정보 수정                                                     |
 | DELETE | /api/characters/:id         | 캐릭터 삭제                                                          |
-| GET    | /api/raid-categories        | 탭 목록                                                              |
-| POST   | /api/raid-categories        | 탭 생성 (관리자, `partyTemplate` 포함)                               |
+| GET    | /api/raid-groups            | 상위탭 목록 (2026-08-27 추가)                                        |
+| POST   | /api/raid-groups            | 상위탭 생성 (관리자)                                                 |
+| PATCH  | /api/raid-groups/:id        | 상위탭 이름 수정 (관리자)                                            |
+| DELETE | /api/raid-groups/:id        | 상위탭 삭제 (관리자, 하위탭·기수 cascade)                            |
+| GET    | /api/raid-categories?groupId= | 해당 상위탭의 하위탭 목록                                          |
+| POST   | /api/raid-categories        | 하위탭 생성 (관리자, `groupId`+`partyTemplate` 포함)                 |
 | PATCH  | /api/raid-categories/:id    | 탭 이름/`partyTemplate` 수정 (관리자, 기존 기수엔 소급 미적용 [D11]) |
 | DELETE | /api/raid-categories/:id    | 탭 삭제 (관리자)                                                     |
 | GET    | /api/raid-teams?categoryId= | 해당 탭의 기수 목록                                                  |
 | POST   | /api/raid-teams             | 기수 생성 (관리자)                                                   |
 | DELETE | /api/raid-teams/:id         | 기수 삭제 (관리자)                                                   |
 | GET    | /api/raid-teams/:id         | 기수 상세(슬롯 포함)                                                 |
-| PUT    | /api/raid-teams/:id         | 슬롯 저장, `baseVersion` 필요, 실패 시 409 + 최신본 반환             |
+| PUT    | /api/raid-teams/:id         | 슬롯 저장, `baseVersion` 필요, 실패 시 409 + 최신본 반환. 그룹 내 다른 기수에 있던 캐릭터는 자동으로 비워짐 |
+| GET    | /api/characters/placements  | 내 캐릭터들의 현재 배치(그룹/카테고리/기수 라벨) — 배지 표시용 (2026-08-27 추가) |
 | POST   | /api/logs                   | 활동 로그 이벤트 전송 (모든 로그인 유저)                             |
 | GET    | /api/logs                   | 활동 로그 조회 (관리자 전용, 필터/페이지네이션)                      |
 

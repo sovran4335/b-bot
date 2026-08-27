@@ -12,7 +12,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import { useCharacters, useMe } from "../../lib/hooks";
+import { useCharacterPlacements, useCharacters, useMe } from "../../lib/hooks";
 import { CharacterPanel } from "../../components/character/CharacterPanel";
 import { RaidPanel } from "../../components/raid/RaidPanel";
 import { ServerSelectBadge } from "../../components/ServerSelect";
@@ -27,9 +27,8 @@ export default function DashboardPage() {
   const queryClient = useQueryClient();
   const { data: adventure, isLoading: meLoading } = useMe();
   const { data: characters } = useCharacters();
+  const { data: placements } = useCharacterPlacements();
   const draft = useRaidDraftStore();
-  const [placedIds, setPlacedIds] = useState<Set<string>>(new Set());
-  const [generationLabel, setGenerationLabel] = useState<string | null>(null);
   const [onboarding, setOnboarding] = useState(false);
   const reorderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sensors = useSensors(
@@ -54,10 +53,11 @@ export default function DashboardPage() {
           type: "slot-character";
           slot: { id: string };
           character: CharacterCard;
+          teamId: string;
         }
       | undefined;
     const overData = over.data.current as
-      | { type: "slot"; slot: { id: string } }
+      | { type: "slot"; slot: { id: string }; teamId: string }
       | { type: "character"; character: CharacterCard }
       | { type: "character-panel" }
       | undefined;
@@ -97,16 +97,21 @@ export default function DashboardPage() {
     // 좌측 패널은 항상 내 모험단 캐릭터만 보여주므로, 저장 전에도 adventureName을
     // 바로 붙여줄 수 있다 (서버 재조회 없이 이미 로드된 내 모험단 이름 재사용)
     if (activeData.type === "character" && overData?.type === "slot") {
-      draft.placeCharacter(overData.slot.id, {
+      draft.placeCharacter(overData.teamId, overData.slot.id, {
         ...activeData.character,
         adventureName: adventure?.name,
       });
       return;
     }
 
-    // 슬롯 -> 다른 슬롯으로 이동
+    // 슬롯 -> 다른 슬롯으로 이동 (다른 기수 보드로 드래그하면 그 기수로 이동)
     if (activeData.type === "slot-character" && overData?.type === "slot") {
-      draft.placeCharacter(overData.slot.id, activeData.character);
+      draft.placeCharacter(
+        overData.teamId,
+        overData.slot.id,
+        activeData.character,
+        activeData.teamId,
+      );
       return;
     }
 
@@ -115,7 +120,7 @@ export default function DashboardPage() {
       activeData.type === "slot-character" &&
       overData?.type === "character-panel"
     ) {
-      draft.clearSlot(activeData.slot.id);
+      draft.clearSlot(activeData.teamId, activeData.slot.id);
     }
   };
 
@@ -129,7 +134,7 @@ export default function DashboardPage() {
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
@@ -171,19 +176,12 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
           <CharacterPanel
             characters={characters ?? []}
-            currentGenerationLabel={generationLabel}
-            placedCharacterIds={placedIds}
+            placements={placements ?? []}
           />
-          <RaidPanel
-            adventure={adventure}
-            onSlotsChange={(ids, label) => {
-              setPlacedIds(ids);
-              setGenerationLabel(label);
-            }}
-          />
+          <RaidPanel adventure={adventure} />
         </div>
       </div>
     </DndContext>

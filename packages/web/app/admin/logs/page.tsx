@@ -77,7 +77,7 @@ export default function AdminLogsPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col p-4">
+    <div className="flex flex-1 flex-col overflow-y-auto p-4">
       <h1 className="mb-3 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
         활동 로그
       </h1>
