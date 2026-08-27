@@ -1,0 +1,42 @@
+name: Deploy discord-bot to EC2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/discord-bot/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/deploy-discord-bot.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # 배포 전 실패한 코드가 서버로 안 나가게 여기서 한 번 더 확인 (빌드 단계는 없음 — tsx로 소스 직접 실행)
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @packages/discord-bot run typecheck
+
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/b-bot
+            git fetch origin main
+            git reset --hard origin/main
+            corepack enable
+            pnpm install --frozen-lockfile
+            cd packages/discord-bot
+            pm2 startOrReload ecosystem.config.cjs
+            pm2 save
