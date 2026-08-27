@@ -2,6 +2,7 @@
 // 로컬 드래프트(슬롯 배치)와 baseVersion을 따로 든다. 서버 상태(React Query)와 분리된 "편집 중" 상태만 다룬다.
 import { create } from "zustand";
 import { RaidSlot, RaidTeam } from "../types";
+import { arrangeAllParties } from "./raidPartyArrange";
 
 type SlotCharacter = NonNullable<RaidSlot["character"]>;
 
@@ -46,26 +47,28 @@ export const useRaidDraftStore = create<RaidDraftState>((set) => ({
       const drafts = { ...state.drafts };
 
       if (sourceTeamId && sourceTeamId !== teamId && drafts[sourceTeamId]) {
+        const clearedSlots = drafts[sourceTeamId].slots.map((s) =>
+          s.character?.id === character.id ? { ...s, character: null } : s,
+        );
         drafts[sourceTeamId] = {
           ...drafts[sourceTeamId],
           dirty: true,
-          slots: drafts[sourceTeamId].slots.map((s) =>
-            s.character?.id === character.id ? { ...s, character: null } : s,
-          ),
+          slots: arrangeAllParties(clearedSlots),
         };
       }
 
       const target = drafts[teamId];
       if (!target) return { drafts };
+      const updatedSlots = target.slots.map((s) => {
+        if (s.id === slotId) return { ...s, character };
+        // 같은 캐릭터가 같은 기수의 다른 슬롯에 이미 있으면 그 자리는 비운다(이동)
+        if (s.character?.id === character.id) return { ...s, character: null };
+        return s;
+      });
       drafts[teamId] = {
         ...target,
         dirty: true,
-        slots: target.slots.map((s) => {
-          if (s.id === slotId) return { ...s, character };
-          // 같은 캐릭터가 같은 기수의 다른 슬롯에 이미 있으면 그 자리는 비운다(이동)
-          if (s.character?.id === character.id) return { ...s, character: null };
-          return s;
-        }),
+        slots: arrangeAllParties(updatedSlots),
       };
       return { drafts };
     }),
@@ -74,15 +77,16 @@ export const useRaidDraftStore = create<RaidDraftState>((set) => ({
     set((state) => {
       const target = state.drafts[teamId];
       if (!target) return {};
+      const updatedSlots = target.slots.map((s) =>
+        s.id === slotId ? { ...s, character: null } : s,
+      );
       return {
         drafts: {
           ...state.drafts,
           [teamId]: {
             ...target,
             dirty: true,
-            slots: target.slots.map((s) =>
-              s.id === slotId ? { ...s, character: null } : s,
-            ),
+            slots: arrangeAllParties(updatedSlots),
           },
         },
       };

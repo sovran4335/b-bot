@@ -134,9 +134,9 @@ function RaidPartyGroup({
           </span>
         )}
         {avgScore !== null && (
-          <div className="ml-auto flex gap-1">
-            <img src="/ico_equi.png" />
-            <span className="text-[12px] font-bold text-[#3392ff]">{avgScore.toLocaleString()}</span>
+          <div className="ml-auto flex gap-1 items-center">
+            <img src="/ico_equi.png" className="w-[15px] h-[15px]" />
+            <span className="text-[13px] font-bold text-[#3392ff]">{avgScore.toLocaleString()}</span>
           </div>
         )}
       </div>
