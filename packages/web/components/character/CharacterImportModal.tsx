@@ -10,13 +10,19 @@ import {
 } from "../../lib/parseCharacterImport";
 import { createCharacter, resolveOfficialIds } from "../../lib/api/characters";
 import { logAction } from "../../lib/logging/logAction";
-import { useMe } from "../../lib/hooks";
+import { useCharacters, useMe } from "../../lib/hooks";
 import { CharacterAvatar } from "./CharacterAvatar";
 
 type PreviewCharacter = ParsedCharacter & {
   officialCharacterId: string | null;
   jobId: string | null;
+  isNew: boolean; // 이미 등록된 이름이면(서버가 동명이면 덮어쓰기 처리) false — "새로 불러온" 캐릭터만 New 표시
 };
+
+// New 캐릭터를 위로, 기존 캐릭터를 아래로 (같은 그룹 안에서는 원래 파싱 순서 유지)
+function sortPreview(list: PreviewCharacter[]): PreviewCharacter[] {
+  return [...list].sort((a, b) => Number(b.isNew) - Number(a.isNew));
+}
 
 // "예시보기" 모달에 보여주는 실제 마이캐릭터 페이지 복사 예시 (전체 선택 복사 시 나오는 그대로)
 const EXAMPLE_TEXT = `NEXON
@@ -109,6 +115,7 @@ export function CharacterImportModal({ onClose }: { onClose: () => void }) {
   const [saveProgress, setSaveProgress] = useState(0);
   const [showExample, setShowExample] = useState(false);
   const { data: adventure } = useMe();
+  const { data: characters } = useCharacters();
   const queryClient = useQueryClient();
 
   const handleParse = async () => {
@@ -121,20 +128,32 @@ export function CharacterImportModal({ onClose }: { onClose: () => void }) {
     }
     setParseError(null);
     setResolving(true);
+    // 서버가 (adventureId, name) 동명이면 덮어쓰기 처리하므로, 같은 이름이 이미 등록돼 있으면 "새로 불러온" 게 아님
+    const existingNames = new Set((characters ?? []).map((c) => c.name));
     try {
       // 초상화 이미지용 officialCharacterId/jobId 조회 — 실패해도 등록 자체는 막지 않는다
       const resolved = await resolveOfficialIds(parsed.map((c) => c.name));
       const byName = new Map(resolved.map((r) => [r.name, r]));
       setPreview(
-        parsed.map((c) => ({
-          ...c,
-          officialCharacterId: byName.get(c.name)?.officialCharacterId ?? null,
-          jobId: byName.get(c.name)?.jobId ?? null,
-        })),
+        sortPreview(
+          parsed.map((c) => ({
+            ...c,
+            officialCharacterId: byName.get(c.name)?.officialCharacterId ?? null,
+            jobId: byName.get(c.name)?.jobId ?? null,
+            isNew: !existingNames.has(c.name),
+          })),
+        ),
       );
     } catch {
       setPreview(
-        parsed.map((c) => ({ ...c, officialCharacterId: null, jobId: null })),
+        sortPreview(
+          parsed.map((c) => ({
+            ...c,
+            officialCharacterId: null,
+            jobId: null,
+            isNew: !existingNames.has(c.name),
+          })),
+        ),
       );
     } finally {
       setResolving(false);
@@ -194,8 +213,15 @@ export function CharacterImportModal({ onClose }: { onClose: () => void }) {
                     jobId={c.jobId}
                   />
                   <div className="min-w-0 flex flex-col ml-2 gap-0.5">
-                    <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                      {c.name}
+                    <span className="flex items-center gap-1.5">
+                      <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                        {c.name}
+                      </span>
+                      {c.isNew && (
+                        <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                          NEW
+                        </span>
+                      )}
                     </span>
                     <span className="text-xs text-zinc-500">{c.job}</span>
                   </div>
